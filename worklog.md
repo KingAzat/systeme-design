@@ -240,3 +240,25 @@ Stage Summary:
 - 5 bugs de calcul identifiés par mesure et corrigés (coûts, séries, double comptage, répartition, ids)
 - Histoire pédagogique du modèle phare validée : goulot détecté → remède → comparaison A/B
 - Livrables : SPA mono-route 9 vues, moteur hybride reproductible, 130 composants, 11 modèles, 23 cours, API REST + SQLite, README + doc moteur
+
+---
+Task ID: 6
+Agent: orchestrateur (principal)
+Task: Correction du bug d'hydratation signalé par l'utilisateur + audit et améliorations
+
+Work Log:
+- Diagnostic de l'erreur rapportée : `data-moz-translations-id="0"` injecté par l'extension Firefox Translations sur le `<span>` du hero avant l'hydratation React (texte identique serveur/client, seul l'attribut externe diffère). Correctif React canonique : `suppressHydrationWarning` appliqué aux éléments textuels du hero (badge, h1 + span interne, value prop, ligne de compteurs) dans landing-view.tsx, + brand « SystemLab » et libellé de vue active dans app-shell.tsx (zone toujours visible, première traitée par les extensions).
+- AUDIT PROFOND (agent-browser + errors --json) : découverte d'un 2e bug d'hydratation RÉEL et reproductible à chaque chargement avec thème sombre — le ThemeToggle rendait aria-label/icône depuis `resolvedTheme` (next-themes 0.4.6 lit localStorage SYNCHRONIQUEMENT au premier rendu client, source vérifiée dans node_modules) alors que le serveur rend `undefined` → diff `aria-label="Passer en thème clair"` vs `"sombre"` + icône Sun vs Moon. Correctif : garde d'hydratation via `useSyncExternalStore` (subscribeNoop, () => true, () => false) — pattern officiel, conforme à la règle eslint react-hooks/set-state-in-effect (le pattern mounted+useEffect simple était refusé par lint) ; le premier rendu client est figé sur l'état serveur puis corrigé post-hydratation.
+- Vérifié par comptage avant/après reload : 0 nouvelle erreur d'hydratation avec theme=dark (le compteur était +1 par chargement avant correctif) ; libellé correct après hydratation ; toggle fonctionnel dans les deux sens.
+- Audit des autres erreurs de session : clés dupliquées « saturation-elevee » = résiduelles (correctif ids suffixés du moteur OK, re-testé E2E : simulation api-scalable avec 3 diagnostics « Saturation élevée » → 0 erreur) ; TypeError `null.document` = artefact d'événement synthétique sans `view` (le vrai drag CDP ne produit aucune erreur) ; « Maximum update depth » (Radix usePresence) non reproductible (dropdown testé OK) ; warning attribution React Flow = notice courtoisie, laissé tel quel.
+- AMÉLIORATIONS :
+  1. next.config.ts : `allowedDevOrigins: ["*.space-z.ai"]` — supprime le warning « Cross origin request detected » du dev.log (redémarrage auto du serveur constaté et propre).
+  2. Code-splitting : EditorView/ResultsView/CompareView passés en `next/dynamic` (ssr: false, loader + ViewLoading accessible role=status). React Flow et Recharts retirés du bundle initial (vérifié : seuls editor/** et results|compare/** les importent, ui/chart.tsx jamais importé). Navigation première vers l'éditeur testée OK, simulation → bascule auto vers Résultats OK.
+  3. Navigation mobile : la barre desktop étant `hidden md:flex`, ajout d'un tiroir MobileNav (Sheet shadcn latéral gauche, w-64, bouton hamburger `md:hidden`, items NAV_ITEMS avec état actif, fermeture à la navigation). Vérifié en 390×844 : ouverture, clic Apprentissage → vue changée, sheet fermé.
+  4. landing-view.tsx : `min-h-screen` → `min-h-full` (le conteneur de scroll du shell a une hauteur définie ; supprime un scroll fantôme de 48px si le contenu devenait court, pattern sticky-footer correct — footer déjà vérifié aligné au bas au scroll).
+- VÉRIFICATIONS FINALES : ESLint 0 erreur/0 warning ; tsc --noEmit 0 erreur dans src/ (erreurs restantes uniquement examples/ et skills/, préexistantes) ; dev.log sans erreur de compilation ; footer flush au bas du conteneur au scroll complet ; aucun débordement horizontal mobile ; rendu visuel des graphiques de résultats confirmé par VLM (courbes/axes/légendes, KPIs chiffrés) ; captures : tool-results/{mobile-landing,mobile-learn,results-final,dashboard-check}.png.
+
+Stage Summary:
+- 2 bugs d'hydratation corrigés : (1) attributs injectés par extension navigateur → suppressHydrationWarning ciblé hero+header ; (2) mismatch ThemeToggle/next-themes reproductible → useHydrated via useSyncExternalStore. 0 erreur d'hydratation sur reload avec thème sombre.
+- 4 améliorations livrées : allowedDevOrigins (warning dev.log), lazy-loading des 3 vues lourdes (React Flow + Recharts hors bundle initial), menu de navigation mobile (Sheet), min-h-full du landing (sticky-footer exact).
+- État final : lint/tsc/dev.log propres, E2E complet re-vérifié (landing, éditeur lazy, simulation, diagnostics sans clés dupliquées, historique, résultats, menu mobile, thème clair/sombre, responsive 390px et 1440px).

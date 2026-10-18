@@ -228,19 +228,39 @@ export function LandingView() {
   const setView = useAppStore((s) => s.setView);
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-background">
+    /* min-h-full (et non min-h-screen) : le conteneur de scroll du shell a une
+       hauteur définie (main flex-1) — le footer colle ainsi exactement au bas
+       du viewport quand le contenu est court, sans scroll fantôme de 48px. */
+    <div className="flex min-h-full w-full flex-col bg-background">
       {/* Hero */}
       <section className="mx-auto w-full max-w-6xl px-6 py-16 lg:px-8">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+            {/*
+             * suppressHydrationWarning : les extensions navigateur (ex. Firefox
+             * Translations) injectent des attributs comme data-moz-translations-id
+             * sur les éléments textuels avant l’hydratation React. Le texte serveur
+             * et client est identique — seule la présence de ces attributs externes
+             * diffère, d’où la suppression ciblée du warning sur les zones textuelles.
+             */}
+            <span
+              suppressHydrationWarning
+              className="inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground"
+            >
               <FlaskConical className="size-3.5 text-primary" />
               Apprendre le System Design en pratiquant
             </span>
-            <h1 className="text-balance mt-6 text-4xl font-semibold tracking-tight sm:text-5xl">
-              Concevez. <span className="text-primary">Simulez.</span> Comprenez.
+            <h1
+              suppressHydrationWarning
+              className="text-balance mt-6 text-4xl font-semibold tracking-tight sm:text-5xl"
+            >
+              Concevez. <span className="text-primary" suppressHydrationWarning>Simulez.</span>{" "}
+              Comprenez.
             </h1>
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground">
+            <p
+              suppressHydrationWarning
+              className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground"
+            >
               Construisez des architectures au drag-and-drop, simulez la charge,
               identifiez les goulots d&apos;étranglement et comparez vos
               solutions — sans provisionner la moindre infrastructure.
@@ -255,7 +275,7 @@ export function LandingView() {
                 Explorer les modèles
               </Button>
             </div>
-            <p className="mt-4 text-xs text-muted-foreground">
+            <p suppressHydrationWarning className="mt-4 text-xs text-muted-foreground">
               {COMPONENTS.length} composants · {TEMPLATES.length} modèles ·{" "}
               {COURSES.length} cours — tout fonctionne dans votre navigateur.
             </p>

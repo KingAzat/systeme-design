@@ -6,7 +6,8 @@
  * selon useAppStore().activeView. L'éditeur occupe toute la hauteur
  * (sans scroll) ; les autres vues défilent dans un conteneur.
  */
-import { useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import {
@@ -15,6 +16,8 @@ import {
   GraduationCap,
   History,
   LayoutGrid,
+  Loader2,
+  Menu,
   Monitor,
   Moon,
   MousePointerClick,
@@ -35,15 +38,50 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { LandingView } from "@/components/landing/landing-view";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
-import { EditorView } from "@/components/editor/editor-view";
-import { ResultsView } from "@/components/results/results-view";
-import { CompareView } from "@/components/compare/compare-view";
 import { TemplatesView } from "@/components/templates/templates-view";
 import { LearnView } from "@/components/learn/learn-view";
 import { HistoryView } from "@/components/history/history-view";
 import { SettingsView } from "@/components/settings/settings-view";
+
+/*
+ * Vues lourdes (React Flow / Recharts) chargées à la demande.
+ * La vue initiale est toujours "landing" (état non persisté dans le store),
+ * ces chunks ne participent donc ni au rendu serveur ni au bundle initial —
+ * la première peinture s’en trouve nettement allégée.
+ */
+const EditorView = dynamic(
+  () => import("@/components/editor/editor-view").then((m) => m.EditorView),
+  { ssr: false, loading: () => <ViewLoading label="Chargement de l’éditeur…" /> },
+);
+const ResultsView = dynamic(
+  () => import("@/components/results/results-view").then((m) => m.ResultsView),
+  { ssr: false, loading: () => <ViewLoading label="Chargement des résultats…" /> },
+);
+const CompareView = dynamic(
+  () => import("@/components/compare/compare-view").then((m) => m.CompareView),
+  { ssr: false, loading: () => <ViewLoading label="Chargement de la comparaison…" /> },
+);
+
+function ViewLoading({ label }: { label: string }) {
+  return (
+    <div
+      className="flex h-full min-h-[40vh] w-full items-center justify-center gap-2 text-sm text-muted-foreground"
+      role="status"
+    >
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+      <span>{label}</span>
+    </div>
+  );
+}
 
 const NAV_ITEMS: { view: AppView; label: string; icon: typeof LayoutGrid }[] = [
   { view: "dashboard", label: "Tableau de bord", icon: LayoutGrid },
@@ -65,9 +103,35 @@ const ICONS: Record<AppView, typeof LayoutGrid> = {
   settings: Settings,
 };
 
+/* Souscription no-op : la valeur ne change jamais après l’hydratation. */
+const subscribeNoop = () => () => {};
+
+/**
+ * Vrai uniquement après l’hydratation cliente (faux pendant le SSR et la
+ * première passe d’hydratation). Alternative au pattern mounted+useEffect,
+ * conforme à la règle react-hooks/set-state-in-effect.
+ */
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  );
+}
+
 function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
+  /*
+   * Garde anti-mismatch d’hydratation : next-themes lit localStorage dès le
+   * premier rendu client (thème « dark » ici) alors que le rendu serveur a
+   * `resolvedTheme` indéfini — l’aria-label et l’icône différaient donc entre
+   * serveur et client. On fige le premier rendu sur l’état serveur (Lune,
+   * « thème sombre ») puis on corrige après hydratation.
+   */
+  const mounted = useHydrated();
+
+  const isDark = mounted && resolvedTheme === "dark";
+  const isSystem = mounted && theme === "system";
   return (
     <Button
       variant="ghost"
@@ -76,7 +140,7 @@ function ThemeToggle() {
       onClick={() => setTheme(isDark ? "light" : "dark")}
       className="h-8 w-8"
     >
-      {theme === "system" ? (
+      {isSystem ? (
         <Monitor className="h-4 w-4" />
       ) : isDark ? (
         <Sun className="h-4 w-4" />
@@ -84,6 +148,62 @@ function ThemeToggle() {
         <Moon className="h-4 w-4" />
       )}
     </Button>
+  );
+}
+
+/**
+ * Menu de navigation mobile (tiroir latéral) : la barre de navigation desktop
+ * est masquée sous `md`, ce tiroir garantit que toutes les vues restent
+ * accessibles depuis l’en-tête sur petit écran.
+ */
+function MobileNav({
+  activeView,
+  onNavigate,
+}: {
+  activeView: AppView;
+  onNavigate: (view: AppView) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 md:hidden"
+          aria-label="Ouvrir le menu de navigation"
+        >
+          <Menu className="h-4 w-4" />
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-64 p-0">
+        <SheetHeader className="border-b px-4 py-3">
+          <SheetTitle className="text-sm">Navigation</SheetTitle>
+        </SheetHeader>
+        <nav aria-label="Navigation mobile" className="flex flex-col gap-0.5 p-2">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.view}
+              type="button"
+              onClick={() => {
+                onNavigate(item.view);
+                setOpen(false);
+              }}
+              aria-current={activeView === item.view ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+                activeView === item.view
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              )}
+            >
+              <item.icon className="h-4 w-4" aria-hidden />
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -149,7 +269,13 @@ export function AppShell() {
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <FlaskConical className="h-3.5 w-3.5" aria-hidden />
           </span>
-          <span className="text-sm font-semibold tracking-tight">SystemLab</span>
+          <span
+            className="text-sm font-semibold tracking-tight"
+            /* Attributs injectés par les extensions navigateur (traduction, etc.) avant hydratation. */
+            suppressHydrationWarning
+          >
+            SystemLab
+          </span>
         </button>
 
         {canGoBack && (
@@ -163,6 +289,10 @@ export function AppShell() {
             <Undo2 className="h-4 w-4 rotate-0" />
           </Button>
         )}
+
+        {/* Navigation mobile — visible uniquement sous md, où la barre
+            desktop est masquée. */}
+        <MobileNav activeView={activeView} onNavigate={setView} />
 
         <nav
           aria-label="Navigation principale"
@@ -189,7 +319,7 @@ export function AppShell() {
 
         <div className="ml-2 hidden items-center gap-1.5 text-[13px] text-muted-foreground sm:flex">
           <ActiveIcon className="h-3.5 w-3.5" aria-hidden />
-          <span>{VIEW_LABELS[activeView]}</span>
+          <span suppressHydrationWarning>{VIEW_LABELS[activeView]}</span>
         </div>
 
         <div className="ml-auto flex items-center gap-1">
