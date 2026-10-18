@@ -1,0 +1,942 @@
+     1→/**
+     2→ * SystemLab — handlers par rôle : la mécanique événementielle de la simulation.
+     3→ *
+     4→ * Une requête traverse le graphe saut par saut (« arrival » → prise de
+     5→ * ressources → « service » → routage aval…). Chaque nœud qui relaie une requête
+     6→ * pousse une frame sur sa pile ; le retour de réponse est simulé par le
+     7→ * « déroulement » (unwind) LIFO synchrone dans `completeRequest` : les slots,
+     8→ * connexions et fenêtres de circuit breaker y sont relâchés/enregistrés.
+     9→ *
+    10→ * Le trajet réseau RETOUR vaut exactement le trajet aller (latence finale =
+    11→ * 2 × réseau + Σ attentes + Σ services) — hypothèse documentée.
+    12→ *
+    13→ * Tout l'aléa passe par ctx.rng (jamais Math.random) : à seed identique, la
+    14→ * trajectoire est reproductible.
+    15→ */
+    16→import type { Frame, NodeRuntime, SimContext, SimRequest } from "./runtime";
+    17→import {
+    18→  DB_CONN_WAIT_TIMEOUT_MS,
+    19→  MAX_HOPS,
+    20→  QUEUE_ACK_PERSIST_MS,
+    21→  SERVER_QUEUE_CAP,
+    22→  consumeToken,
+    23→  trafficProfileFactor,
+    24→} from "./runtime";
+    25→import { hashString } from "./rng";
+    26→
+    27→/* ============================================================
+    28→ * Codes d'erreur / rejet (comptabilisés par MetricsStore)
+    29→ * ============================================================ */
+    30→
+    31→const ERR = {
+    32→  outage: "outage-conn-refused", // nœud en panne (connexion refusée)
+    33→  loop: "loop-detected", // MAX_HOPS dépassé (« Boucle détectée »)
+    34→  overload: "503-overload", // capacité en débit dépassée (cdn, balancer, proxy…)
+    35→  queueFull: "503-queue-full", // file FIFO serveur pleine
+    36→  rateLimit: "429-rate-limit", // quota du rate limiter
+    37→  noTarget: "502-no-target", // aucune cible disponible (balancer)
+    38→  app: "500-app", // erreur applicative aléatoire
+    39→  timeout: "timeout-504", // délai amont dépassé
+    40→  connExhausted: "conn-exhausted", // pool de connexions base épuisé
+    41→  cbOpen: "cb-open", // circuit breaker ouvert
+    42→  workerTimeout: "worker-timeout", // timeout asynchrone d'un worker
+    43→  queueFullAsync: "queue-full", // enqueue refusé (profondeur max)
+    44→  unknown: "error",
+    45→} as const;
+    46→
+    47→/** Les rejets (429/503) ne comptent ni en erreur ni en indisponibilité. */
+    48→const REJECT_CODES: ReadonlySet<string> = new Set([
+    49→  ERR.overload,
+    50→  ERR.queueFull,
+    51→  ERR.rateLimit,
+    52→  ERR.queueFullAsync,
+    53→]);
+    54→
+    55→function isRejectCode(code: string | undefined): boolean {
+    56→  return code !== undefined && REJECT_CODES.has(code);
+    57→}
+    58→
+    59→const clampNum = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
+    60→
+    61→/* ============================================================
+    62→ * Fabriques de requêtes
+    63→ * ============================================================ */
+    64→
+    65→function newRequest(
+    66→  ctx: SimContext,
+    67→  generatorId: string,
+    68→  isRead: boolean,
+    69→  sizeKb: number,
+    70→  internal: boolean,
+    71→  depth: number,
+    72→): SimRequest {
+    73→  return {
+    74→    id: ctx.reqSeq++,
+    75→    createdAt: ctx.now,
+    76→    generatorId,
+    77→    isRead,
+    78→    sizeKb,
+    79→    networkMs: 0,
+    80→    waitMs: 0,
+    81→    serviceMs: 0,
+    82→    legWaitMs: 0,
+    83→    legServiceMs: 0,
+    84→    hops: 0,
+    85→    frames: [],
+    86→    internal,
+    87→    depth,
+    88→    preSlotted: false,
+    89→    cacheDecision: null,
+    90→  };
+    91→}
+    92→
+    93→/** Clone « fire-and-forget » d'un fan-out : frames vierges, interne, profondeur bornée. */
+    94→function cloneRequest(ctx: SimContext, req: SimRequest): SimRequest {
+    95→  return {
+    96→    ...req,
+    97→    id: ctx.reqSeq++,
+    98→    frames: [],
+    99→    internal: true,
+   100→    depth: req.depth + 1,
+   101→  };
+   102→}
+   103→
+   104→/* ============================================================
+   105→ * Routage aval
+   106→ * ============================================================ */
+   107→
+   108→/**
+   109→ * Transmet la requête vers `targetId` via l'arête correspondante.
+   110→ * `extraDelayMs` = temps de traitement du nœud émetteur (ajouté au délai
+   111→ * réseau de l'arête). Retourne false si la cible est inconnue.
+   112→ */
+   113→function forwardTo(
+   114→  ctx: SimContext,
+   115→  req: SimRequest,
+   116→  fromNodeId: string,
+   117→  targetId: string,
+   118→  extraDelayMs = 0,
+   119→): boolean {
+   120→  if (!ctx.nodes.has(targetId)) {
+   121→    completeRequest(ctx, req, fromNodeId, false, ERR.noTarget);
+   122→    return false;
+   123→  }
+   124→  if (req.hops >= MAX_HOPS) {
+   125→    ctx.loopKilled++;
+   126→    completeRequest(ctx, req, fromNodeId, false, ERR.loop);
+   127→    return false;
+   128→  }
+   129→  let edgeLatencyMs = 0;
+   130→  for (const o of ctx.out.get(fromNodeId) ?? []) {
+   131→    if (o.targetId === targetId) {
+   132→      edgeLatencyMs = Math.max(0, o.edge.networkLatencyMs);
+   133→      break;
+   134→    }
+   135→  }
+   136→  req.hops++;
+   137→  req.networkMs += edgeLatencyMs;
+   138→  ctx.heap.push({
+   139→    time: ctx.now + extraDelayMs + edgeLatencyMs,
+   140→    type: "arrival",
+   141→    nodeId: targetId,
+   142→    req,
+   143→  });
+   144→  return true;
+   145→}
+   146→
+   147→/** Fan-out générique : la 1re sortie porte la requête, les suivantes des clones internes. */
+   148→function forwardFanout(
+   149→  ctx: SimContext,
+   150→  rt: NodeRuntime,
+   151→  req: SimRequest,
+   152→  delayMs = 0,
+   153→): void {
+   154→  const outs = ctx.out.get(rt.id) ?? [];
+   155→  if (outs.length === 0) {
+   156→    completeRequest(ctx, req, rt.id, true);
+   157→    return;
+   158→  }
+   159→  for (let i = 0; i < outs.length; i++) {
+   160→    const r = i === 0 ? req : cloneRequest(ctx, req);
+   161→    forwardTo(ctx, r, rt.id, outs[i].targetId, delayMs);
+   162→  }
+   163→}
+   164→
+   165→/** Cible de routage d'un serveur selon le mix lecture/écriture (même logique que l'estimation). */
+   166→function serverRouteTarget(
+   167→  ctx: SimContext,
+   168→  rt: NodeRuntime,
+   169→  isRead: boolean,
+   170→): { targetId: string | null; fanout: boolean } {
+   171→  const caches: string[] = [];
+   172→  const replicas: string[] = [];
+   173→  const databases: string[] = [];
+   174→  const queues: string[] = [];
+   175→  for (const o of ctx.out.get(rt.id) ?? []) {
+   176→    const t = ctx.nodes.get(o.targetId);
+   177→    if (!t) continue;
+   178→    if (t.role === "cache") caches.push(o.targetId);
+   179→    else if (t.role === "replica") replicas.push(o.targetId);
+   180→    else if (t.role === "database") databases.push(o.targetId);
+   181→    else if (t.role === "queue") queues.push(o.targetId);
+   182→  }
+   183→  if (isRead) {
+   184→    // Lectures : cache direct (hit/miss fetch-through) → réplica → base → file.
+   185→    if (caches.length > 0) return { targetId: caches[0], fanout: false };
+   186→    if (replicas.length > 0) return { targetId: replicas[0], fanout: false };
+   187→    if (databases.length > 0) return { targetId: databases[0], fanout: false };
+   188→    if (queues.length > 0) return { targetId: queues[0], fanout: false };
+   189→  } else {
+   190→    // Écritures : write-around vers la base → file (async) → cache.
+   191→    if (databases.length > 0) return { targetId: databases[0], fanout: false };
+   192→    if (queues.length > 0) return { targetId: queues[0], fanout: false };
+   193→    if (caches.length > 0) return { targetId: caches[0], fanout: false };
+   194→  }
+   195→  return { targetId: null, fanout: true };
+   196→}
+   197→
+   198→/* ============================================================
+   199→ * Complétion / déroulement des frames
+   200→ * ============================================================ */
+   201→
+   202→/**
+   203→ * Termine une requête : transmet le verdict au nœud terminal (frame dédiée
+   204→ * si présente, sinon comptage direct), déroule la pile de frames (relâche
+   205→ * slots/connexions, enregistre les circuit breakers, vérifie les timeouts
+   206→ * amont), puis comptabilise le résultat client.
+   207→ */
+   208→function completeRequest(
+   209→  ctx: SimContext,
+   210→  req: SimRequest,
+   211→  terminalId: string | null,
+   212→  ok: boolean,
+   213→  code?: string,
+   214→): void {
+   215→  const now = ctx.now;
+   216→  let success = ok;
+   217→  let errCode = code;
+   218→
+   219→  if (terminalId !== null) {
+   220→    // Le nœud terminal possède-t-il sa propre frame au sommet de la pile ?
+   221→    // (rôles à slots : server, cache, database, replica, worker — frame poussée
+   222→    // par startService). Dans ce cas le déroulement applique le verdict (une
+   223→    // seule fois : endVisit + compteur + releaseSlot). Sinon, comptage direct.
+   224→    const top = req.frames.length > 0 ? req.frames[req.frames.length - 1] : undefined;
+   225→    if (top !== undefined && top.kind === "server" && top.nodeId === terminalId) {
+   226→      top.verdict = success ? "ok" : isRejectCode(errCode) ? "reject" : "error";
+   227→      top.verdictCode = errCode;
+   228→    } else {
+   229→      ctx.metrics.endVisit(terminalId);
+   230→      if (success) ctx.metrics.addProcessed(terminalId);
+   231→      else if (isRejectCode(errCode)) ctx.metrics.addRejected(terminalId);
+   232→      else ctx.metrics.addError(terminalId, errCode ?? ERR.unknown);
+   233→    }
+   234→  }
+   235→
+   236→  while (req.frames.length > 0) {
+   237→    const frame = req.frames.pop() as Frame;
+   238→    if (frame.kind === "server" && frame.verdict !== undefined) {
+   239→      // frame du nœud terminal : verdict final déjà établi
+   240→      ctx.metrics.endVisit(frame.nodeId);
+   241→      if (frame.verdict === "ok") ctx.metrics.addProcessed(frame.nodeId);
+   242→      else if (frame.verdict === "reject") ctx.metrics.addRejected(frame.nodeId);
+   243→      else ctx.metrics.addError(frame.nodeId, frame.verdictCode ?? ERR.unknown);
+   244→      releaseSlotAndDrain(ctx, frame.nodeId);
+   245→      continue;
+   246→    }
+   247→    if (frame.kind === "server") {
+   248→      const rt = ctx.nodes.get(frame.nodeId);
+   249→      ctx.metrics.endVisit(frame.nodeId);
+   250→      let timedOut = false;
+   251→      if (rt?.role === "server") {
+   252→        // temps sous-arbre aval (règle « cascade de timeouts »)
+   253→        ctx.metrics.sampleDownstream(frame.nodeId, Math.max(0, now - frame.routedAt - frame.ownServiceMs));
+   254→        // attente + service + descendants > timeout ⇒ 504
+   255→        if (frame.ownWaitMs + (now - frame.routedAt) > frame.timeoutMs) timedOut = true;
+   256→      }
+   257→      if (timedOut) {
+   258→        success = false;
+   259→        errCode = ERR.timeout;
+   260→        ctx.metrics.addError(frame.nodeId, ERR.timeout);
+   261→      } else {
+   262→        ctx.metrics.addProcessed(frame.nodeId);
+   263→      }
+   264→      releaseSlotAndDrain(ctx, frame.nodeId);
+   265→    } else if (frame.kind === "breaker") {
+   266→      recordBreakerResult(ctx, frame.nodeId, frame.targetId, success, now);
+   267→    } else {
+   268→      // « hop » : relais sans ressource (cdn, balancer, proxy…)
+   269→      ctx.metrics.endVisit(frame.nodeId);
+   270→      if (success) ctx.metrics.addProcessed(frame.nodeId);
+   271→    }
+   272→  }
+   273→
+   274→  if (!req.internal) {
+   275→    ctx.metrics.endVisit(req.generatorId);
+   276→    if (success) {
+   277→      // réseau aller + attentes + services + MÊME réseau en retour
+   278→      ctx.metrics.onServed(now, 2 * req.networkMs + req.waitMs + req.serviceMs);
+   279→      ctx.metrics.addProcessed(req.generatorId);
+   280→    } else if (isRejectCode(errCode)) {
+   281→      ctx.metrics.onRejected(now);
+   282→      ctx.metrics.addRejected(req.generatorId);
+   283→    } else {
+   284→      ctx.metrics.onError(now);
+   285→      ctx.metrics.addError(req.generatorId, errCode ?? ERR.unknown);
+   286→    }
+   287→  }
+   288→}
+   289→
+   290→function failRequest(
+   291→  ctx: SimContext,
+   292→  req: SimRequest,
+   293→  atNodeId: string,
+   294→  code: string,
+   295→): void {
+   296→  completeRequest(ctx, req, atNodeId, false, code);
+   297→}
+   298→
+   299→/* ============================================================
+   300→ * Slots, files FIFO, service
+   301→ * ============================================================ */
+   302→
+   303→function releaseSlotAndDrain(ctx: SimContext, nodeId: string): void {
+   304→  ctx.metrics.releaseSlot(nodeId, ctx.now);
+   305→  tryDrainFifo(ctx, ctx.nodes.get(nodeId));
+   306→}
+   307→
+   308→/** Temps de service par rôle (dégradation : × 1/facteur de panne). */
+   309→function serviceTimeFor(ctx: SimContext, rt: NodeRuntime, req: SimRequest, factor: number): number {
+   310→  const f = factor > 0 ? factor : 1;
+   311→  let base: number;
+   312→  switch (rt.role) {
+   313→    case "server":
+   314→      // lognormal bornée [0,2× ; 5×] : traitements longs rares
+   315→      base = rt.rc.avgServiceMs * clampNum(Math.exp(rt.rc.serviceVariability * ctx.rng.gaussian()), 0.2, 5);
+   316→      break;
+   317→    case "worker":
+   318→      base = rt.rc.avgProcessingMs * clampNum(Math.exp(0.3 * ctx.rng.gaussian()), 0.2, 5);
+   319→      break;
+   320→    case "database":
+   321→      base = req.isRead
+   322→        ? rt.rc.avgReadMs * (rt.rc.internalCacheEnabled ? 0.6 : 1)
+   323→        : rt.rc.avgWriteMs;
+   324→      break;
+   325→    case "replica":
+   326→      base = rt.rc.avgReadMs;
+   327→      break;
+   328→    case "cache":
+   329→      base = rt.rc.avgServiceMs;
+   330→      break;
+   331→    default:
+   332→      base = rt.rc.latencyMs;
+   333→  }
+   334→  return Math.max(0.05, base / f);
+   335→}
+   336→
+   337→/**
+   338→ * Démarre le service : prend un slot, pousse la frame (relâchée au retour),
+   339→ * programme la fin de service. Le nœud tient sa resistance pendant tout le
+   340→ * temps des descendants (modèle synchrone réaliste).
+   341→ */
+   342→function startService(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
+   343→  const factor = ctx.failure.factor(rt.id, ctx.now);
+   344→  const svc = serviceTimeFor(ctx, rt, req, factor);
+   345→  req.serviceMs += svc;
+   346→  req.legServiceMs = svc;
+   347→  ctx.metrics.takeSlot(rt.id, ctx.now);
+   348→  ctx.metrics.sampleService(rt.id, svc);
+   349→  req.frames.push({
+   350→    kind: "server",
+   351→    nodeId: rt.id,
+   352→    ownWaitMs: req.legWaitMs,
+   353→    ownServiceMs: svc,
+   354→    routedAt: ctx.now,
+   355→    timeoutMs: rt.rc.timeoutMs,
+   356→  });
+   357→  ctx.heap.push({ time: ctx.now + svc, type: "service", nodeId: rt.id, req });
+   358→}
+   359→
+   360→/** Capacité FIFO (domaine échantillonné) avant rejet 503. */
+   361→function fifoCap(ctx: SimContext): number {
+   362→  return Math.max(1, Math.round(SERVER_QUEUE_CAP * ctx.scale));
+   363→}
+   364→
+   365→/** Tente de démarrer le service des requêtes en attente (slots libres). */
+   366→function tryDrainFifo(ctx: SimContext, rt: NodeRuntime | undefined): void {
+   367→  if (!rt) return;
+   368→  if (rt.role === "queue") return; // les messages files sont dispatchés vers les workers
+   369→  const fifoRoles = rt.role === "server" || rt.role === "cache" || rt.role === "database" || rt.role === "replica" || rt.role === "worker";
+   370→  if (!fifoRoles) return;
+   371→  const acc = ctx.metrics.acc(rt.id);
+   372→  while (rt.fifo.length > 0 && acc.slotsBusy < rt.slots) {
+   373→    const entry = rt.fifo.shift();
+   374→    if (!entry) break;
+   375→    const waitMs = Math.max(0, ctx.now - entry.enqueuedAt);
+   376→    entry.req.waitMs += waitMs;
+   377→    entry.req.legWaitMs = waitMs;
+   378→    ctx.metrics.sampleWait(rt.id, waitMs);
+   379→    ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+   380→    // dépassement du délai d'attente pendant la file
+   381→    if (rt.role === "database" && waitMs > DB_CONN_WAIT_TIMEOUT_MS) {
+   382→      failRequest(ctx, entry.req, rt.id, ERR.connExhausted);
+   383→      continue;
+   384→    }
+   385→    if (rt.role === "server" && waitMs >= rt.rc.timeoutMs) {
+   386→      failRequest(ctx, entry.req, rt.id, ERR.timeout);
+   387→      continue;
+   388→    }
+   389→    startService(ctx, rt, entry.req);
+   390→  }
+   391→}
+   392→
+   393→/** Arrivée sur un nœud à slots : service immédiat ou file d'attente FIFO. */
+   394→function arriveAtSlotNode(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
+   395→  const acc = ctx.metrics.acc(rt.id);
+   396→  if (acc.slotsBusy < rt.slots) {
+   397→    req.legWaitMs = 0;
+   398→    startService(ctx, rt, req);
+   399→    return;
+   400→  }
+   401→  if (rt.fifo.length >= fifoCap(ctx)) {
+   402→    failRequest(ctx, req, rt.id, ERR.queueFull);
+   403→    return;
+   404→  }
+   405→  rt.fifo.push({ req, enqueuedAt: ctx.now });
+   406→  ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+   407→}
+   408→
+   409→/* ============================================================
+   410→ * Générateur — arrivées Poisson
+   411→ * ============================================================ */
+   412→
+   413→function handleGen(ctx: SimContext, nodeId: string): void {
+   414→  const rt = ctx.nodes.get(nodeId);
+   415→  if (!rt || rt.role !== "generator") return;
+   416→  const share = rt.rc.weight / Math.max(0.001, ctx.genTotalWeight);
+   417→  const factor = trafficProfileFactor(ctx.profile, ctx.now / 1000, ctx.durationSec, ctx.rng);
+   418→  const lambda = Math.max(0, ctx.rps * factor * ctx.scale * share);
+   419→  const dt = lambda > 0 ? ctx.rng.expovariateMs(lambda) : 1000;
+   420→  if (ctx.now + dt <= ctx.durationMs) {
+   421→    ctx.heap.push({ time: ctx.now + dt, type: "gen", nodeId });
+   422→  }
+   423→  const f = ctx.failure.factor(nodeId, ctx.now);
+   424→  if (f <= 0) return; // générateur en panne : aucune émission
+   425→  if (f < 1 && !ctx.rng.chance(f)) return; // dégradation : amincissement
+   426→
+   427→  const outs = ctx.out.get(nodeId) ?? [];
+   428→  const req = newRequest(ctx, nodeId, ctx.rng.chance(ctx.readRatio), ctx.requestSizeKb, false, 0);
+   429→  ctx.metrics.onGenerated(ctx.now);
+   430→  ctx.metrics.beginVisit(nodeId, req.isRead, ctx.now);
+   431→  if (outs.length === 0) {
+   432→    completeRequest(ctx, req, nodeId, true);
+   433→    return;
+   434→  }
+   435→  req.networkMs = ctx.networkLatencyMs; // première latence réseau du chemin
+   436→  const pick = outs[rt.rr++ % outs.length];
+   437→  forwardTo(ctx, req, nodeId, pick.targetId);
+   438→}
+   439→
+   440→/* ============================================================
+   441→ * Circuit breaker
+   442→ * ============================================================ */
+   443→
+   444→function breakerStateFor(rt: NodeRuntime, targetId: string) {
+   445→  let st = rt.cb.get(targetId);
+   446→  if (!st) {
+   447→    st = {
+   448→      status: "closed",
+   449→      window: [],
+   450→      openUntilMs: 0,
+   451→      probesLeft: rt.rc.halfOpenProbes,
+   452→      openCount: 0,
+   453→      lastOpenAtMs: null,
+   454→    };
+   455→    rt.cb.set(targetId, st);
+   456→  }
+   457→  return st;
+   458→}
+   459→
+   460→/** Le breaker laisse-t-il passer un appel vers `targetId` ? (rafraîchit OPEN→HALF-OPEN) */
+   461→function breakerAllows(ctx: SimContext, rt: NodeRuntime, targetId: string): boolean {
+   462→  const st = breakerStateFor(rt, targetId);
+   463→  if (st.status === "open" && ctx.now >= st.openUntilMs) {
+   464→    st.status = "half-open";
+   465→    st.probesLeft = rt.rc.halfOpenProbes;
+   466→  }
+   467→  if (st.status === "open") return false;
+   468→  if (st.status === "half-open") {
+   469→    if (st.probesLeft <= 0) return false;
+   470→    st.probesLeft--;
+   471→    return true;
+   472→  }
+   473→  return true;
+   474→}
+   475→
+   476→function tripBreaker(ctx: SimContext, rt: NodeRuntime, st: NonNullable<ReturnType<typeof breakerStateFor>>, now: number): void {
+   477→  st.status = "open";
+   478→  st.openUntilMs = now + rt.rc.cooldownMs;
+   479→  st.probesLeft = rt.rc.halfOpenProbes;
+   480→  st.openCount++;
+   481→  st.lastOpenAtMs = now;
+   482→  st.window = [];
+   483→  ctx.metrics.addCircuitOpen(rt.id, now);
+   484→}
+   485→
+   486→function recordBreakerResult(
+   487→  ctx: SimContext,
+   488→  nodeId: string,
+   489→  targetId: string,
+   490→  ok: boolean,
+   491→  now: number,
+   492→): void {
+   493→  const rt = ctx.nodes.get(nodeId);
+   494→  if (!rt || rt.role !== "circuit-breaker") return;
+   495→  const st = rt.cb.get(targetId);
+   496→  if (!st) return;
+   497→  if (st.status === "half-open") {
+   498→    if (ok) {
+   499→      st.status = "closed";
+   500→      st.window = [];
+   501→    } else {
+   502→      tripBreaker(ctx, rt, st, now);
+   503→    }
+   504→    return;
+   505→  }
+   506→  if (st.status !== "closed") return;
+   507→  st.window.push(ok);
+   508→  if (st.window.length > rt.rc.minRequestsToTrip) st.window.shift();
+   509→  if (st.window.length >= rt.rc.minRequestsToTrip) {
+   510→    const failures = st.window.reduce((s, v) => s + (v ? 0 : 1), 0);
+   511→    if (failures / st.window.length >= rt.rc.errorThreshold) {
+   512→      tripBreaker(ctx, rt, st, now);
+   513→    }
+   514→  }
+   515→}
+   516→
+   517→/* ============================================================
+   518→ * Rate limiter
+   519→ * ============================================================ */
+   520→
+   521→function allowRate(ctx: SimContext, rt: NodeRuntime): boolean {
+   522→  if (rt.rc.rlAlgorithm === "sliding-window") {
+   523→    const limit = Math.max(1, rt.rc.limit * ctx.scale);
+   524→    rt.rlWindow = rt.rlWindow.filter((t) => ctx.now - t < 1000);
+   525→    if (rt.rlWindow.length >= limit) return false;
+   526→    rt.rlWindow.push(ctx.now);
+   527→    return true;
+   528→  }
+   529→  // token bucket : régime permanent = limit, rafale initiale = limit + burst
+   530→  const rate = Math.max(0.001, rt.rc.limit * ctx.scale);
+   531→  const cap = Math.max(rate, (rt.rc.limit + rt.rc.burst) * ctx.scale);
+   532→  const b = rt.rlTokens;
+   533→  if (!b) return true;
+   534→  if (ctx.now > b.lastRefillMs) {
+   535→    b.tokens = Math.min(cap, b.tokens + (rate * (ctx.now - b.lastRefillMs)) / 1000);
+   536→    b.lastRefillMs = ctx.now;
+   537→  }
+   538→  if (b.tokens >= 1) {
+   539→    b.tokens -= 1;
+   540→    return true;
+   541→  }
+   542→  return false;
+   543→}
+   544→
+   545→/* ============================================================
+   546→ * Files → workers
+   547→ * ============================================================ */
+   548→
+   549→function handleDispatch(ctx: SimContext, rt: NodeRuntime): void {
+   550→  if (rt.role !== "queue") return;
+   551→  const outs = ctx.out.get(rt.id) ?? [];
+   552→  for (const o of outs) {
+   553→    const w = ctx.nodes.get(o.targetId);
+   554→    if (!w || w.role !== "worker") continue;
+   555→    const acc = ctx.metrics.acc(w.id);
+   556→    while (rt.fifo.length > 0 && acc.slotsBusy < w.slots) {
+   557→      const entry = rt.fifo.shift();
+   558→      if (!entry) break;
+   559→      const waitMs = Math.max(0, ctx.now - entry.enqueuedAt);
+   560→      entry.req.waitMs += waitMs;
+   561→      entry.req.legWaitMs = waitMs;
+   562→      entry.req.preSlotted = true;
+   563→      ctx.metrics.sampleWait(rt.id, waitMs);
+   564→      ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+   565→      const factor = ctx.failure.factor(w.id, ctx.now);
+   566→      const proc = Math.max(
+   567→        0.05,
+   568→        (w.rc.avgProcessingMs * clampNum(Math.exp(0.3 * ctx.rng.gaussian()), 0.2, 5)) /
+   569→          (factor > 0 ? factor : 1),
+   570→      );
+   571→      entry.req.serviceMs += proc;
+   572→      entry.req.legServiceMs = proc;
+   573→      ctx.metrics.takeSlot(w.id, ctx.now);
+   574→      ctx.metrics.sampleService(w.id, proc);
+   575→      entry.req.frames.push({
+   576→        kind: "server",
+   577→        nodeId: w.id,
+   578→        ownWaitMs: 0,
+   579→        ownServiceMs: proc,
+   580→        routedAt: ctx.now,
+   581→        timeoutMs: w.rc.timeoutMs,
+   582→      });
+   583→      ctx.heap.push({ time: ctx.now + proc, type: "service", nodeId: w.id, req: entry.req });
+   584→    }
+   585→  }
+   586→}
+   587→
+   588→/** Redéclenche le dispatch des files alimentant ce worker. */
+   589→function kickUpstreamQueues(ctx: SimContext, workerId: string): void {
+   590→  for (const src of ctx.rev.get(workerId) ?? []) {
+   591→    const q = ctx.nodes.get(src);
+   592→    if (q && q.role === "queue") {
+   593→      ctx.heap.push({ time: ctx.now, type: "dispatch", nodeId: src });
+   594→    }
+   595→  }
+   596→}
+   597→
+   598→/* ============================================================
+   599→ * Arrivée sur un nœud — dispatch par rôle
+   600→ * ============================================================ */
+   601→
+   602→function handleArrival(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
+   603→  const f = ctx.failure.factor(rt.id, ctx.now);
+   604→  if (f <= 0) {
+   605→    ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   606→    failRequest(ctx, req, rt.id, ERR.outage);
+   607→    return;
+   608→  }
+   609→
+   610→  switch (rt.role) {
+   611→    case "generator":
+   612→    case "pass-through": {
+   613→      // relais neutre : 1 ms, capacité illimitée
+   614→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   615→      const outs = ctx.out.get(rt.id) ?? [];
+   616→      if (outs.length === 0) {
+   617→        completeRequest(ctx, req, rt.id, true);
+   618→        return;
+   619→      }
+   620→      req.serviceMs += 1 / f;
+   621→      req.frames.push({ kind: "hop", nodeId: rt.id });
+   622→      forwardFanout(ctx, rt, req, 1 / f);
+   623→      return;
+   624→    }
+   625→
+   626→    case "cdn": {
+   627→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   628→      const rate = Math.max(0.001, rt.rc.capacityRps * ctx.scale * f);
+   629→      if (rt.bucket && !consumeToken(rt.bucket, rate, ctx.now)) {
+   630→        failRequest(ctx, req, rt.id, ERR.overload);
+   631→        return;
+   632→      }
+   633→      const hit = req.isRead && ctx.rng.chance(rt.rc.cacheHitRatio);
+   634→      req.cacheDecision = hit ? "hit" : "miss";
+   635→      if (hit) {
+   636→        ctx.metrics.addCacheHit(rt.id);
+   637→        const svc = rt.rc.hitLatencyMs / f;
+   638→        req.serviceMs += svc;
+   639→        req.legServiceMs = svc;
+   640→        ctx.heap.push({ time: ctx.now + svc, type: "service", nodeId: rt.id, req });
+   641→        return;
+   642→      }
+   643→      const outs = ctx.out.get(rt.id) ?? [];
+   644→      if (outs.length === 0) {
+   645→        completeRequest(ctx, req, rt.id, true);
+   646→        return;
+   647→      }
+   648→      const svc = rt.rc.latencyMs / f;
+   649→      req.serviceMs += svc;
+   650→      req.frames.push({ kind: "hop", nodeId: rt.id });
+   651→      forwardFanout(ctx, rt, req, svc);
+   652→      return;
+   653→    }
+   654→
+   655→    case "balancer": {
+   656→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   657→      const rate = Math.max(0.001, rt.rc.capacityRps * Math.max(1, rt.rc.instances) * ctx.scale * f);
+   658→      if (rt.bucket && !consumeToken(rt.bucket, rate, ctx.now)) {
+   659→        failRequest(ctx, req, rt.id, ERR.overload);
+   660→        return;
+   661→      }
+   662→      const outs = ctx.out.get(rt.id) ?? [];
+   663→      if (outs.length === 0) {
+   664→        failRequest(ctx, req, rt.id, ERR.noTarget);
+   665→        return;
+   666→      }
+   667→      const targets = outs.map((o) => o.targetId).filter((id) => ctx.nodes.has(id));
+   668→      const healthy = rt.rc.healthCheck
+   669→        ? targets.filter((id) => ctx.failure.factor(id, ctx.now) > 0)
+   670→        : targets;
+   671→      if (healthy.length === 0) {
+   672→        // health checks actifs et toutes les cibles en panne
+   673→        failRequest(ctx, req, rt.id, ERR.noTarget);
+   674→        return;
+   675→      }
+   676→      let pick: string;
+   677→      if (rt.rc.algorithm === "least-connections") {
+   678→        let best = healthy[0];
+   679→        let bestInFlight = Number.POSITIVE_INFINITY;
+   680→        for (const id of healthy) {
+   681→          const infl = ctx.metrics.acc(id).inFlight;
+   682→          if (infl < bestInFlight) {
+   683→            bestInFlight = infl;
+   684→            best = id;
+   685→          }
+   686→        }
+   687→        pick = best;
+   688→      } else if (rt.rc.algorithm === "ip-hash") {
+   689→        pick = healthy[hashString(`req-${req.id}`) % healthy.length];
+   690→      } else {
+   691→        pick = healthy[rt.rr++ % healthy.length];
+   692→      }
+   693→      const svc = rt.rc.latencyMs / f;
+   694→      req.serviceMs += svc;
+   695→      req.frames.push({ kind: "hop", nodeId: rt.id });
+   696→      forwardTo(ctx, req, rt.id, pick, svc);
+   697→      return;
+   698→    }
+   699→
+   700→    case "rate-limiter": {
+   701→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   702→      if (!allowRate(ctx, rt)) {
+   703→        // 429 immédiat, sans toucher l'aval
+   704→        failRequest(ctx, req, rt.id, ERR.rateLimit);
+   705→        return;
+   706→      }
+   707→      const outs = ctx.out.get(rt.id) ?? [];
+   708→      if (outs.length === 0) {
+   709→        completeRequest(ctx, req, rt.id, true);
+   710→        return;
+   711→      }
+   712→      const svc = rt.rc.latencyMs / f;
+   713→      req.serviceMs += svc;
+   714→      req.frames.push({ kind: "hop", nodeId: rt.id });
+   715→      forwardFanout(ctx, rt, req, svc);
+   716→      return;
+   717→    }
+   718→
+   719→    case "circuit-breaker": {
+   720→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   721→      const outs = ctx.out.get(rt.id) ?? [];
+   722→      if (outs.length === 0) {
+   723→        completeRequest(ctx, req, rt.id, true);
+   724→        return;
+   725→      }
+   726→      const svc = 1 / f;
+   727→      req.serviceMs += svc;
+   728→      let primaryUsed = false;
+   729→      for (let i = 0; i < outs.length; i++) {
+   730→        const targetId = outs[i].targetId;
+   731→        if (!ctx.nodes.has(targetId)) continue;
+   732→        if (!breakerAllows(ctx, rt, targetId)) continue; // circuit ouvert pour cette cible
+   733→        const r = primaryUsed ? cloneRequest(ctx, req) : req;
+   734→        r.frames.push({ kind: "breaker", nodeId: rt.id, targetId });
+   735→        primaryUsed = true; // la requête primaire est consommée (réussite ou échec)
+   736→        forwardTo(ctx, r, rt.id, targetId, svc);
+   737→      }
+   738→      if (!primaryUsed) {
+   739→        // tous les circuits sont ouverts
+   740→        failRequest(ctx, req, rt.id, ERR.cbOpen);
+   741→      }
+   742→      return;
+   743→    }
+   744→
+   745→    case "proxy": {
+   746→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   747→      const rate = Math.max(0.001, rt.rc.capacityRps * ctx.scale * f);
+   748→      if (rt.bucket && !consumeToken(rt.bucket, rate, ctx.now)) {
+   749→        failRequest(ctx, req, rt.id, ERR.overload);
+   750→        return;
+   751→      }
+   752→      const svc = rt.rc.latencyMs / f;
+   753→      req.serviceMs += svc;
+   754→      req.frames.push({ kind: "hop", nodeId: rt.id });
+   755→      forwardFanout(ctx, rt, req, svc);
+   756→      return;
+   757→    }
+   758→
+   759→    case "storage": {
+   760→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   761→      const rate = Math.max(0.001, rt.rc.capacityRps * ctx.scale * f);
+   762→      if (rt.bucket && !consumeToken(rt.bucket, rate, ctx.now)) {
+   763→        failRequest(ctx, req, rt.id, ERR.overload);
+   764→        return;
+   765→      }
+   766→      const svc = rt.rc.latencyMs / f;
+   767→      req.serviceMs += svc;
+   768→      req.legServiceMs = svc;
+   769→      ctx.heap.push({ time: ctx.now + svc, type: "service", nodeId: rt.id, req });
+   770→      return;
+   771→    }
+   772→
+   773→    case "server":
+   774→    case "cache":
+   775→    case "database":
+   776→    case "replica":
+   777→    case "worker": {
+   778→      ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   779→      if (rt.role === "cache") {
+   780→        // décision hit/miss tirée à l'arrivée (ordre déterministe des tirages)
+   781→        req.cacheDecision = req.isRead && ctx.rng.chance(rt.rc.hitRatio) ? "hit" : "miss";
+   782→      }
+   783→      arriveAtSlotNode(ctx, rt, req);
+   784→      return;
+   785→    }
+   786→
+   787→    case "queue": {
+   788→      handleQueueArrival(ctx, rt, req);
+   789→      return;
+   790→    }
+   791→  }
+   792→}
+   793→
+   794→/** Enqueue : acquitte la requête émettrice (202) et crée un message interne. */
+   795→function handleQueueArrival(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
+   796→  ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
+   797→  const depthCap = Math.max(1, Math.round(rt.rc.maxDepth * ctx.scale));
+   798→  if (rt.fifo.length >= depthCap) {
+   799→    failRequest(ctx, req, rt.id, ERR.queueFullAsync);
+   800→    return;
+   801→  }
+   802→  const msg = newRequest(ctx, req.generatorId, req.isRead, req.sizeKb, true, req.depth + 1);
+   803→  rt.fifo.push({ req: msg, enqueuedAt: ctx.now });
+   804→  ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+   805→  // acquittement : +2 ms si messages persistants
+   806→  const ack = rt.rc.persistMessages ? QUEUE_ACK_PERSIST_MS : 0;
+   807→  if (ack > 0) {
+   808→    req.serviceMs += ack;
+   809→    req.legServiceMs = ack;
+   810→    ctx.heap.push({ time: ctx.now + ack, type: "service", nodeId: rt.id, req });
+   811→  } else {
+   812→    completeRequest(ctx, req, rt.id, true); // 202 immédiat
+   813→  }
+   814→  ctx.heap.push({ time: ctx.now, type: "dispatch", nodeId: rt.id });
+   815→}
+   816→
+   817→/* ============================================================
+   818→ * Fin de service — dispatch par rôle
+   819→ * ============================================================ */
+   820→
+   821→function handleService(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
+   822→  switch (rt.role) {
+   823→    case "server": {
+   824→      // erreur applicative aléatoire (composant + base du scénario)
+   825→      if (ctx.rng.chance(Math.min(1, rt.rc.errorRate + ctx.baseErrorRate))) {
+   826→        failRequest(ctx, req, rt.id, ERR.app);
+   827→        return;
+   828→      }
+   829→      const { targetId, fanout } = serverRouteTarget(ctx, rt, req.isRead);
+   830→      if (targetId !== null) {
+   831→        forwardTo(ctx, req, rt.id, targetId);
+   832→        return;
+   833→      }
+   834→      if (!fanout) {
+   835→        completeRequest(ctx, req, rt.id, true);
+   836→        return;
+   837→      }
+   838→      forwardFanout(ctx, rt, req);
+   839→      return;
+   840→    }
+   841→
+   842→    case "cache": {
+   843→      if (req.cacheDecision === "hit") {
+   844→        ctx.metrics.addCacheHit(rt.id);
+   845→        completeRequest(ctx, req, rt.id, true);
+   846→        return;
+   847→      }
+   848→      // miss / écriture : fetch-through ou write-around vers SA base aval
+   849→      // (la frame serveur du cache est déjà empilée : connexion maintenue)
+   850→      forwardFanout(ctx, rt, req);
+   851→      return;
+   852→    }
+   853→
+   854→    case "database":
+   855→    case "replica":
+   856→    case "storage": {
+   857→      completeRequest(ctx, req, rt.id, true);
+   858→      return;
+   859→    }
+   860→
+   861→    case "worker": {
+   862→      completeWorkerMessage(ctx, rt, req);
+   863→      return;
+   864→    }
+   865→
+   866→    case "queue": {
+   867→      // acquittement 202 différé (persistance)
+   868→      completeRequest(ctx, req, rt.id, true);
+   869→      return;
+   870→    }
+   871→
+   872→    case "cdn": {
+   873→      if (req.cacheDecision === "hit") {
+   874→        completeRequest(ctx, req, rt.id, true);
+   875→        return;
+   876→      }
+   877→      forwardFanout(ctx, rt, req);
+   878→      return;
+   879→    }
+   880→
+   881→    default: {
+   882→      completeRequest(ctx, req, rt.id, true);
+   883→    }
+   884→  }
+   885→}
+   886→
+   887→/** Fin de traitement d'un message par un worker (asynchrone vis-à-vis du client). */
+   888→function completeWorkerMessage(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
+   889→  const timedOut = req.legServiceMs > rt.rc.timeoutMs;
+   890→  if (timedOut) {
+   891→    // erreur asynchrone : la requête émettrice est déjà servie (202)
+   892→    failRequest(ctx, req, rt.id, ERR.workerTimeout);
+   893→  } else {
+   894→    completeRequest(ctx, req, rt.id, true);
+   895→    // effet de bord : écriture du résultat vers l'aval (profondeur bornée)
+   896→    if (req.depth < 2) {
+   897→      const { targetId, fanout } = serverRouteTarget(ctx, rt, false);
+   898→      if (targetId !== null) {
+   899→        const wr = newRequest(ctx, req.generatorId, false, req.sizeKb, true, req.depth + 1);
+   900→        forwardTo(ctx, wr, rt.id, targetId);
+   901→      } else if (fanout) {
+   902→        const wr = newRequest(ctx, req.generatorId, false, req.sizeKb, true, req.depth + 1);
+   903→        forwardFanout(ctx, rt, wr);
+   904→      }
+   905→    }
+   906→  }
+   907→  kickUpstreamQueues(ctx, rt.id);
+   908→}
+   909→
+   910→/* ============================================================
+   911→ * Aiguillage des événements
+   912→ * ============================================================ */
+   913→
+   914→export function processEvent(
+   915→  ctx: SimContext,
+   916→  ev: { type: string; nodeId: string; req?: SimRequest | null },
+   917→): void {
+   918→  switch (ev.type) {
+   919→    case "gen":
+   920→      handleGen(ctx, ev.nodeId);
+   921→      break;
+   922→    case "arrival": {
+   923→      const rt = ctx.nodes.get(ev.nodeId);
+   924→      if (!rt || !ev.req) break;
+   925→      handleArrival(ctx, rt, ev.req);
+   926→      break;
+   927→    }
+   928→    case "service": {
+   929→      const rt = ctx.nodes.get(ev.nodeId);
+   930→      if (!rt || !ev.req) break;
+   931→      handleService(ctx, rt, ev.req);
+   932→      break;
+   933→    }
+   934→    case "dispatch": {
+   935→      const rt = ctx.nodes.get(ev.nodeId);
+   936→      if (!rt) break;
+   937→      handleDispatch(ctx, rt);
+   938→      break;
+   939→    }
+   940→  }
+   941→}
+   942→

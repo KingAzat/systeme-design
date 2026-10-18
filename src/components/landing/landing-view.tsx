@@ -6,6 +6,7 @@ import {
   Gauge,
   GitCompare,
   GraduationCap,
+  Landmark,
   LayoutGrid,
   Lightbulb,
   MousePointerClick,
@@ -18,7 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useAppStore } from "@/stores/app-store";
 import { COMPONENTS } from "@/data/catalog";
 import { COURSES } from "@/data/courses";
-import { TEMPLATES } from "@/data/templates";
+import { BIG_TECH_META, TEMPLATES } from "@/data/templates";
 
 /**
  * SystemLab — page d'accueil.
@@ -64,7 +65,7 @@ const FEATURES: { icon: LucideIcon; title: string; lines: [string, string] }[] =
     icon: LayoutGrid,
     title: `${TEMPLATES.length} modèles prêts`,
     lines: [
-      "De l'API minimale au pipeline RAG, jusqu'au multi-région.",
+      "De l'API minimale au multi-région — plus les géants de la tech.",
       "Explorez, modifiez et simulez sans partir d'une page blanche.",
     ],
   },
@@ -77,6 +78,8 @@ const FEATURES: { icon: LucideIcon; title: string; lines: [string, string] }[] =
     ],
   },
 ];
+
+const BIG_TECH_COUNT = TEMPLATES.filter((t) => t.id in BIG_TECH_META).length;
 
 const STEPS: { n: string; title: string; text: string }[] = [
   {
@@ -315,6 +318,47 @@ export function LandingView() {
               </Card>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Architectures des géants de la tech */}
+      <section className="border-t bg-card">
+        <div className="mx-auto w-full max-w-6xl px-6 py-16 lg:px-8">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
+                <Landmark className="size-6 text-primary" aria-hidden />
+                Les géants de la tech, en modèles
+              </h2>
+              <p className="mt-2 max-w-2xl text-muted-foreground">
+                {BIG_TECH_COUNT} architectures emblématiques reconstruites avec les
+                composants du laboratoire : même structure, mêmes arbitrages, à
+                votre échelle. Ouvrez-les, cassez-les, réparez-les.
+              </p>
+            </div>
+            <Button variant="outline" onClick={() => setView("templates")}>
+              Explorer les modèles
+              <ArrowRight />
+            </Button>
+          </div>
+          <ul className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {TEMPLATES.filter((t) => t.id in BIG_TECH_META).map((t) => (
+              <li
+                key={t.id}
+                className="flex items-start gap-3 rounded-lg border bg-background px-4 py-3"
+              >
+                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <Landmark className="size-4" aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.name}</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                    {BIG_TECH_META[t.id].inspiration}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 

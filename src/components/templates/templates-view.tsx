@@ -2,6 +2,8 @@
 
 import { useMemo, useState, type KeyboardEvent } from "react";
 
+import { Landmark } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LevelBadge } from "@/components/learn/level-badge";
 import { TemplatePreview } from "@/components/templates/template-preview";
 import { useAppStore } from "@/stores/app-store";
@@ -27,7 +30,7 @@ import { getCategoryStyle, getIcon } from "@/lib/icons";
 import { formatRps } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { COURSES } from "@/data/courses";
-import { TEMPLATES } from "@/data/templates";
+import { BIG_TECH_META, TEMPLATES } from "@/data/templates";
 import type {
   ArchitectureTemplate,
   CatalogComponent,
@@ -39,7 +42,28 @@ import type {
  * SystemLab — Galerie des modèles d'architecture.
  * Chaque carte propose un aperçu SVG statique généré depuis les données réelles
  * du modèle ; le clic ouvre un dialogue de détail (composants, scénario, cours liés).
+ * Les modèles « géants de la tech » (YouTube, Netflix, WhatsApp…) sont filtrables
+ * et triés en tête de galerie.
  */
+
+type TemplateFamily = "all" | "classics" | "bigtech";
+
+const FAMILY_LABELS: Record<TemplateFamily, string> = {
+  all: "Tous",
+  classics: "Modèles classiques",
+  bigtech: "Géants de la tech",
+};
+
+/** Géants d'abord (tri stable : l'ordre interne de chaque famille est conservé). */
+const SORTED_TEMPLATES = [...TEMPLATES].sort(
+  (a, b) => Number(b.id in BIG_TECH_META) - Number(a.id in BIG_TECH_META),
+);
+
+function filterTemplates(family: TemplateFamily): ArchitectureTemplate[] {
+  if (family === "classics") return SORTED_TEMPLATES.filter((t) => !(t.id in BIG_TECH_META));
+  if (family === "bigtech") return SORTED_TEMPLATES.filter((t) => t.id in BIG_TECH_META);
+  return SORTED_TEMPLATES;
+}
 
 const MODE_LABELS: Record<SimulationMode, string> = {
   quick: "Rapide",
@@ -87,6 +111,7 @@ function TemplateCard({
   onOpenDetail: () => void;
 }) {
   const openTemplate = useAppStore((s) => s.openTemplate);
+  const company = BIG_TECH_META[template.id]?.company;
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Enter" || event.key === " ") {
@@ -101,12 +126,27 @@ function TemplateCard({
       tabIndex={0}
       onClick={onOpenDetail}
       onKeyDown={handleKeyDown}
-      className="cursor-pointer gap-3 py-4 transition-colors hover:border-primary/40 focus-visible:border-primary/40 focus-visible:outline-none"
+      className={cn(
+        "cursor-pointer gap-3 py-4 transition-colors hover:border-primary/40 focus-visible:border-primary/40 focus-visible:outline-none",
+        company && "border-primary/25",
+      )}
     >
       <CardHeader className="px-4">
         <CardTitle className="flex items-center justify-between gap-2 text-base leading-snug">
           <span className="truncate">{template.name}</span>
-          <LevelBadge level={template.difficulty} />
+          <span className="flex shrink-0 items-center gap-1.5">
+            {company && (
+              <Badge
+                variant="outline"
+                className="gap-1 border-primary/30 bg-primary/5 px-1.5 font-medium text-primary"
+                title={`Inspiré de l'architecture de ${company}`}
+              >
+                <Landmark className="size-3" aria-hidden />
+                {company}
+              </Badge>
+            )}
+            <LevelBadge level={template.difficulty} />
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="px-4">
@@ -152,8 +192,13 @@ export function TemplatesView() {
   const setView = useAppStore((s) => s.setView);
   const openCourse = useAppStore((s) => s.openCourse);
 
+  const [family, setFamily] = useState<TemplateFamily>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId !== null ? TEMPLATES.find((t) => t.id === selectedId) ?? null : null;
+
+  const visibleTemplates = useMemo(() => filterTemplates(family), [family]);
+  const bigTechCount = useMemo(() => TEMPLATES.filter((t) => t.id in BIG_TECH_META).length, []);
+  const inspiration = selected ? BIG_TECH_META[selected.id] : undefined;
 
   const componentGroups = useMemo(
     () => (selected ? groupComponents(selected) : []),
@@ -171,11 +216,40 @@ export function TemplatesView() {
     <div className="mx-auto w-full max-w-[1200px] p-6">
       <h1 className="text-2xl font-semibold tracking-tight">Modèles d&apos;architecture</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        {TEMPLATES.length} architectures prêtes à explorer, modifier et simuler.
+        {TEMPLATES.length} architectures prêtes à explorer, modifier et simuler — dont{" "}
+        {bigTechCount} inspirées des géants de la tech.
       </p>
 
+      <Tabs
+        value={family}
+        onValueChange={(value) => setFamily(value as TemplateFamily)}
+        className="mt-5"
+      >
+        <TabsList
+          aria-label="Filtrer les modèles par famille"
+          className="h-auto w-full flex-wrap justify-start sm:h-9 sm:w-auto sm:justify-center"
+        >
+          {(Object.keys(FAMILY_LABELS) as TemplateFamily[]).map((key) => {
+            const count =
+              key === "all"
+                ? TEMPLATES.length
+                : key === "bigtech"
+                  ? bigTechCount
+                  : TEMPLATES.length - bigTechCount;
+            return (
+              <TabsTrigger key={key} value={key}>
+                {FAMILY_LABELS[key]}
+                <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">
+                  {count}
+                </span>
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </Tabs>
+
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {TEMPLATES.map((template) => (
+        {visibleTemplates.map((template) => (
           <TemplateCard
             key={template.id}
             template={template}
@@ -201,6 +275,13 @@ export function TemplatesView() {
               <DialogDescription className="pt-1 leading-relaxed">
                 {selected.description}
               </DialogDescription>
+              {inspiration && (
+                <p className="flex items-center gap-1.5 text-xs text-primary">
+                  <Landmark className="size-3.5 shrink-0" aria-hidden />
+                  Inspiré de {inspiration.inspiration} — composants et échelle
+                  adaptés au laboratoire.
+                </p>
+              )}
             </DialogHeader>
 
             <div className="space-y-4">

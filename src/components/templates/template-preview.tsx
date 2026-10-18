@@ -143,7 +143,7 @@ export function TemplatePreview({
             markerHeight="6"
             orient="auto-start-reverse"
           >
-            <path d="M 0 1 L 9 5 L 0 9 z" className="fill-muted-foreground/60" />
+            <path d="M 0 1 L 9 5 L 0 9 z" className="fill-muted-foreground/60 dark:fill-muted-foreground/80" />
           </marker>
         </defs>
 
@@ -201,7 +201,7 @@ export function TemplatePreview({
               x2={clipped.ex}
               y2={clipped.ey}
               strokeWidth={1.4}
-              className="stroke-muted-foreground/45"
+              className="stroke-muted-foreground/45 dark:stroke-muted-foreground/65"
               markerEnd={`url(#${markerId})`}
             />
           );
@@ -220,7 +220,7 @@ export function TemplatePreview({
                 height={NODE_H}
                 rx={7}
                 strokeWidth={1}
-                className="fill-card stroke-border"
+                className="fill-card stroke-border dark:fill-muted-foreground/15 dark:stroke-muted-foreground/45"
               />
               <circle
                 cx={n.position.x + 15}

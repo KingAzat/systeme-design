@@ -263,6 +263,13 @@ function completeRequest(
       }
       releaseSlotAndDrain(ctx, frame.nodeId);
     } else if (frame.kind === "breaker") {
+      // Le circuit breaker relaie sans slot : sa visite se solde ici.
+      // Sans ce comptage, un nœud Circuit Breaker affichait un débit nul
+      // alors qu'il transitait tout le trafic (et son inFlight fuyait).
+      ctx.metrics.endVisit(frame.nodeId);
+      if (success) ctx.metrics.addProcessed(frame.nodeId);
+      else if (isRejectCode(errCode)) ctx.metrics.addRejected(frame.nodeId);
+      else ctx.metrics.addError(frame.nodeId, errCode ?? ERR.unknown);
       recordBreakerResult(ctx, frame.nodeId, frame.targetId, success, now);
     } else {
       // « hop » : relais sans ressource (cdn, balancer, proxy…)
@@ -570,6 +577,10 @@ function handleDispatch(ctx: SimContext, rt: NodeRuntime): void {
       );
       entry.req.serviceMs += proc;
       entry.req.legServiceMs = proc;
+      // Visite comptée à la mise en service : sans elle, les workers n'ont
+      // aucune « arrivée » et restaient exclus du choix du goulot (le badge
+      // tombait alors sur un nœud aval deux fois moins utilisé).
+      ctx.metrics.beginVisit(w.id, entry.req.isRead, ctx.now);
       ctx.metrics.takeSlot(w.id, ctx.now);
       ctx.metrics.sampleService(w.id, proc);
       entry.req.frames.push({
@@ -749,6 +760,17 @@ function handleArrival(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void 
         failRequest(ctx, req, rt.id, ERR.overload);
         return;
       }
+      // Sortie anticipée AVANT l'empilement de la frame « hop » : sinon le
+      // completeRequest terminal ET le déroulement de la frame compteraient
+      // chacun une requête traitée (double comptage observé sur les proxys
+      // terminaux — ex. Service notification à 2× le débit d'entrée).
+      const outs = ctx.out.get(rt.id) ?? [];
+      if (outs.length === 0) {
+        const svc = rt.rc.latencyMs / f;
+        req.serviceMs += svc;
+        ctx.heap.push({ time: ctx.now + svc, type: "service", nodeId: rt.id, req });
+        return;
+      }
       const svc = rt.rc.latencyMs / f;
       req.serviceMs += svc;
       req.frames.push({ kind: "hop", nodeId: rt.id });
@@ -892,8 +914,13 @@ function completeWorkerMessage(ctx: SimContext, rt: NodeRuntime, req: SimRequest
     failRequest(ctx, req, rt.id, ERR.workerTimeout);
   } else {
     completeRequest(ctx, req, rt.id, true);
-    // effet de bord : écriture du résultat vers l'aval (profondeur bornée)
-    if (req.depth < 2) {
+    // effet de bord : écriture du résultat vers l'aval (profondeur bornée).
+    // Seuil 3 (et non 2) : un proxy/pass-through en amont de la file ajoute
+    // un niveau de profondeur à chaque clone de fan-out — sinon les workers
+    // derrière une passerelle (ingestion, rate limiter…) n'écrivaient jamais
+    // leur résultat aval. Chaque cycle worker → file → worker consomme deux
+    // niveaux : la chaîne reste bornée.
+    if (req.depth < 3) {
       const { targetId, fanout } = serverRouteTarget(ctx, rt, false);
       if (targetId !== null) {
         const wr = newRequest(ctx, req.generatorId, false, req.sizeKb, true, req.depth + 1);

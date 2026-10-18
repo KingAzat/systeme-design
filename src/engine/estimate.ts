@@ -57,11 +57,19 @@ export function estimateArchitecture(arch: ArchitectureData): NodeEstimate[] {
   const roles = new Map<string, SimRole>();
   for (const id of index.nodeIds) {
     const meta = index.nodes.get(id);
-    if (!meta || !meta.role) continue;
+    if (!meta) continue;
     const node = (arch.nodes ?? []).find((n) => n.id === id);
     if (!node) continue;
-    rcs.set(id, resolveRoleConfig(node));
-    roles.set(id, meta.role);
+    if (meta.role) {
+      rcs.set(id, resolveRoleConfig(node));
+      roles.set(id, meta.role);
+    } else {
+      // Composant visuel (maturité « visuelle ») : relais pass-through pour la
+      // propagation du débit — sinon le flux s'arrête net sur un WebSocket ou
+      // une zone de disponibilité placée sur le chemin et tout l'aval passe
+      // pour inutilisé dans l'estimation rapide.
+      roles.set(id, "pass-through");
+    }
   }
 
   /* --- capacité de drain des files (workers aval) --- */
@@ -107,7 +115,6 @@ export function estimateArchitecture(arch: ArchitectureData): NodeEstimate[] {
       const flow = next.get(id) ?? { ...ZERO };
       if (total(flow) <= 0) continue;
       const rc = rcs.get(id)!;
-      const readShare = total(flow) > 0 ? flow.read / total(flow) : globalReadRatio;
       const add = (targetId: string, amount: Flow): void => {
         const t = next.get(targetId);
         if (!t) return;
@@ -151,21 +158,31 @@ export function estimateArchitecture(arch: ArchitectureData): NodeEstimate[] {
           break;
         }
         case "server": {
-          // même priorité que le moteur : lectures cache→réplica→base→file,
-          // écritures base→file→cache (write-around)
+          // Même priorité que le moteur : lectures cache→réplica→base→file,
+          // écritures base→file→cache (write-around). Le débit est réparti
+          // lecture/écriture comme le fait le moteur requête par requête
+          // (l'ancienne approximation « readShare ≥ 0.5 → tout vers la cible
+          // de lecture » laissait les chemins d'écriture à 0 % en mode rapide).
           const caches = outs.filter((e) => outRole(e.target) === "cache");
           const replicas = outs.filter((e) => outRole(e.target) === "replica");
           const databases = outs.filter((e) => outRole(e.target) === "database");
           const queues = outs.filter((e) => outRole(e.target) === "queue");
-          let target: string | null = null;
-          if (readShare >= 0.5) {
-            target =
-              caches[0]?.target ?? replicas[0]?.target ?? databases[0]?.target ?? queues[0]?.target ?? null;
-          } else {
-            target = databases[0]?.target ?? queues[0]?.target ?? caches[0]?.target ?? null;
-          }
-          if (target) {
-            add(target, flow);
+          const readTarget =
+            caches[0]?.target ?? replicas[0]?.target ?? databases[0]?.target ?? queues[0]?.target ?? null;
+          const writeTarget =
+            databases[0]?.target ?? queues[0]?.target ?? caches[0]?.target ?? null;
+          if (readTarget !== null && writeTarget !== null) {
+            if (readTarget === writeTarget) {
+              add(readTarget, flow);
+            } else {
+              add(readTarget, { read: flow.read, write: 0 });
+              add(writeTarget, { read: 0, write: flow.write });
+            }
+          } else if (readTarget !== null) {
+            // pas de cible d'écriture prioritaire (ex. réplica seul) :
+            // le moteur retombe sur le fan-out générique pour les écritures
+            add(readTarget, { read: flow.read, write: 0 });
+            if (outs.length > 0) for (const e of outs) add(e.target, { read: 0, write: flow.write });
           } else if (outs.length > 0) {
             for (const e of outs) add(e.target, flow); // fan-out générique
           }

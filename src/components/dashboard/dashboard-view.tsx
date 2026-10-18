@@ -11,6 +11,7 @@ import {
   History,
   Layers,
   Loader2,
+  MonitorPlay,
   Network,
   Pencil,
   Plus,
@@ -79,8 +80,8 @@ const MODE_LABELS: Record<string, string> = {
 
 const QUICK_TEMPLATE_ICONS: Record<string, LucideIcon> = {
   "api-simple": Server,
-  "three-tier": Layers,
   "api-scalable": Network,
+  "youtube-video": MonitorPlay,
   "rag-ai": Bot,
 };
 
@@ -168,7 +169,7 @@ export function DashboardView() {
 
   const quickTemplates = useMemo(
     () =>
-      ["api-simple", "three-tier", "api-scalable", "rag-ai"]
+      ["api-simple", "api-scalable", "youtube-video", "rag-ai"]
         .map((id) => TEMPLATES.find((t) => t.id === id))
         .filter((t) => t !== undefined),
     [],
