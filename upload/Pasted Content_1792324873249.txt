@@ -1,0 +1,1311 @@
+# PROJET : SYSTEMLAB
+## Plateforme interactive d'apprentissage et de simulation du System Design
+
+Tu es un ingénieur logiciel senior spécialisé en Next.js, TypeScript,
+architecture logicielle, systèmes distribués, simulation événementielle,
+React Flow et conception d'interfaces techniques avancées.
+
+Ta mission est de développer une véritable application web appelée
+SystemLab, en utilisant l'image jointe comme référence visuelle principale.
+
+ATTENTION :
+L'image jointe est une maquette de référence. Elle définit l'apparence,
+l'organisation générale et l'expérience utilisateur recherchées.
+
+Tu dois reproduire fidèlement son design, tout en construisant une
+application fonctionnelle, interactive, maintenable et extensible.
+
+Ne te contente pas de reproduire l'image avec des composants statiques.
+Les boutons, les panneaux, les connexions, les configurations et les
+simulations doivent fonctionner.
+
+Ne remplace pas les fonctionnalités essentielles par de simples
+animations ou des valeurs fictives.
+
+==================================================
+1. VISION DU PRODUIT
+==================================================
+
+SystemLab est un laboratoire interactif destiné à apprendre le
+System Design en construisant et en testant des architectures logicielles.
+
+L'utilisateur doit pouvoir :
+
+1. Construire une architecture visuellement.
+2. Ajouter des composants informatiques.
+3. Connecter les composants entre eux.
+4. Configurer leurs propriétés.
+5. Définir un scénario de trafic.
+6. Lancer une simulation.
+7. Observer les performances du système.
+8. Identifier les goulots d'étranglement.
+9. Simuler des pannes.
+10. Comprendre les causes des problèmes.
+11. Modifier l'architecture.
+12. Comparer les résultats avant et après modification.
+13. Apprendre les concepts techniques concernés.
+
+L'expérience doit être intuitive pour un débutant tout en permettant
+aux utilisateurs avancés d'explorer des architectures complexes.
+
+Le produit doit ressembler à un outil d'ingénierie professionnel,
+et non à un simple site de cours.
+
+INSPIRATIONS :
+- n8n pour l'édition visuelle et les connexions.
+- React Flow pour le canvas interactif.
+- Linear pour la sobriété de l'interface.
+- Grafana pour les tableaux de bord techniques.
+- Figma pour la manipulation fluide des éléments.
+
+Ne copie pas exactement ces produits.
+Crée une identité propre à SystemLab.
+
+Langue principale : français.
+Les noms techniques reconnus peuvent rester en anglais.
+
+==================================================
+2. STACK TECHNIQUE
+==================================================
+
+Utilise les technologies suivantes :
+
+Frontend :
+- Next.js avec App Router.
+- React.
+- TypeScript en mode strict.
+- Tailwind CSS.
+- shadcn/ui pour les composants d'interface.
+- Lucide React pour les icônes.
+
+Éditeur :
+- @xyflow/react (React Flow).
+- Utiliser les custom nodes et les custom edges.
+- Supporter les interactions natives de React Flow.
+- Ajouter une minimap, un système de zoom et un contrôle de la vue.
+
+Visualisation :
+- Recharts pour les graphiques de résultats.
+- CSS et SVG lorsque cela est plus adapté.
+
+Validation :
+- Zod pour valider les configurations et les entrées.
+
+Gestion des formulaires :
+- React Hook Form si nécessaire.
+
+Gestion de l'état :
+- Zustand pour l'état de l'éditeur et de la simulation.
+- Séparer clairement l'état du canvas, les paramètres et les résultats.
+
+Tests :
+- Vitest pour les tests unitaires.
+- Playwright pour les parcours critiques de l'interface.
+
+Persistance :
+- Prévoir une couche de persistance indépendante de l'interface.
+- Utiliser localStorage pour le mode local et les préférences non sensibles.
+- Concevoir une interface de stockage permettant d'ajouter ultérieurement
+  une base de données et une authentification.
+
+Ne pas imposer une base de données distante si elle n'est pas nécessaire
+pour la première version.
+
+Si Supabase est déjà configuré dans le projet, inspecte l'intégration
+existante et réutilise-la intelligemment.
+
+Ne crée pas une seconde solution d'authentification inutile.
+
+Respecte les versions de dépendances déjà présentes dans le projet.
+N'écrase pas arbitrairement les configurations existantes.
+
+==================================================
+3. ANALYSE DU PROJET AVANT LE DÉVELOPPEMENT
+==================================================
+
+Avant de modifier les fichiers :
+
+1. Inspecte le dépôt.
+2. Identifie la version de Next.js.
+3. Vérifie les dépendances installées.
+4. Vérifie la structure des dossiers.
+5. Identifie les pages déjà présentes.
+6. Vérifie les configurations Tailwind et TypeScript.
+7. Identifie les éventuelles intégrations existantes.
+8. Identifie les tests disponibles.
+
+Si le projet existe déjà, conserve les éléments pertinents.
+
+Ne recrée pas inutilement un projet depuis zéro.
+
+Ensuite, établis un plan d'implémentation et commence le développement.
+
+Ne t'arrête pas à un plan ou à une liste de recommandations :
+implémente réellement les fonctionnalités.
+
+==================================================
+4. DESIGN ET IDENTITÉ VISUELLE
+==================================================
+
+Utilise l'image jointe comme référence visuelle principale.
+
+La maquette montre un éditeur clair avec :
+
+- Une barre supérieure.
+- Une bibliothèque de composants à gauche.
+- Un canvas central.
+- Un panneau de configuration à droite.
+- Une barre de simulation en bas.
+- Une minimap.
+- Des commandes de zoom.
+- Un bouton principal de simulation.
+
+Reproduis cette structure.
+
+Palette de couleurs :
+
+Fond principal : #F7F8FA
+Surfaces : #FFFFFF
+Texte principal : #17202A
+Texte secondaire : #64748B
+Bordures : #E2E8F0
+Couleur principale : #4F46E5
+Succès : #16A34A
+Avertissement : #D97706
+Erreur : #DC2626
+Information : #0284C7
+
+Utilise une typographie lisible et des espacements cohérents.
+
+Les panneaux doivent être compacts sans devenir difficiles à lire.
+
+Le canvas doit occuper la majeure partie de l'écran.
+
+Prévois un mode sombre fonctionnel.
+
+Évite :
+- Les dégradés décoratifs excessifs.
+- Les effets glassmorphism omniprésents.
+- Les grandes cartes inutiles.
+- Les animations excessives.
+- Les interfaces surchargées.
+- Les textes trop petits.
+- Les données fictives présentées comme réelles.
+
+L'application doit être responsive, mais l'expérience desktop est prioritaire.
+
+==================================================
+5. STRUCTURE DE L'APPLICATION
+==================================================
+
+Créer les routes suivantes :
+
+/                       Landing page
+/dashboard              Tableau de bord
+/editor/[id]            Éditeur d'architecture
+/simulations/[id]       Résultats d'une simulation
+/compare                Comparaison d'architectures
+/templates              Bibliothèque de modèles
+/learn                  Parcours d'apprentissage
+/learn/[slug]           Cours détaillé
+/challenges             Exercices pratiques
+/history                Historique des simulations
+/settings               Paramètres utilisateur
+
+La priorité absolue est :
+
+1. L'éditeur.
+2. Le moteur de simulation.
+3. Les résultats.
+4. Le diagnostic.
+5. La sauvegarde.
+6. Les fonctionnalités pédagogiques.
+7. Le dashboard et les pages secondaires.
+
+Ne passe pas trop de temps à perfectionner le marketing avant que
+le cœur technique du produit fonctionne.
+
+==================================================
+6. ÉDITEUR VISUEL
+==================================================
+
+C'est le cœur de SystemLab.
+
+L'utilisateur doit pouvoir construire une architecture sans écrire
+de code.
+
+Utilise React Flow pour gérer le canvas.
+
+Fonctionnalités obligatoires :
+
+- Ajouter un composant par glisser-déposer.
+- Déplacer les composants.
+- Sélectionner un composant.
+- Sélectionner plusieurs composants.
+- Relier les composants.
+- Déplacer les connexions.
+- Supprimer une connexion.
+- Supprimer un composant.
+- Dupliquer un composant.
+- Copier et coller.
+- Annuler une modification.
+- Rétablir une modification.
+- Zoom avant et arrière.
+- Déplacer la vue.
+- Ajuster la vue à l'écran.
+- Afficher une minimap.
+- Sélectionner une zone.
+- Ajouter des notes.
+- Créer des groupes visuels.
+- Renommer l'architecture.
+- Sauvegarder les modifications.
+- Charger une architecture existante.
+
+Prévoir un système de validation des connexions.
+
+Exemple :
+Une connexion entre un client HTTP et un serveur API est valide.
+
+Une connexion incompatible doit afficher un message explicatif
+sans bloquer toute l'application.
+
+Les connexions doivent posséder :
+- Une source.
+- Une destination.
+- Un type.
+- Un protocole éventuel.
+- Des paramètres réseau.
+- Un sens de circulation.
+- Des métriques de simulation.
+
+L'utilisateur doit pouvoir sélectionner une connexion pour modifier
+ses propriétés.
+
+Les groupes visuels doivent permettre de regrouper des composants
+par domaine, région ou couche architecturale.
+
+Ne confonds pas un groupe visuel avec un composant exécutant un
+traitement.
+
+==================================================
+7. BIBLIOTHÈQUE DE COMPOSANTS
+==================================================
+
+Créer une bibliothèque organisée en catégories, avec recherche,
+favoris et composants récemment utilisés.
+
+Catégories :
+
+1. Clients et trafic.
+2. Réseau.
+3. Compute et applications.
+4. Bases SQL.
+5. Bases NoSQL.
+6. Cache.
+7. Messagerie et événements.
+8. Stockage.
+9. Recherche et données.
+10. Communication.
+11. Identité et sécurité.
+12. Résilience.
+13. Observabilité.
+14. Architecture distribuée.
+15. Traitements différés.
+16. Intelligence artificielle.
+17. Services métier.
+18. Infrastructure et cloud.
+
+Composants initiaux à implémenter :
+
+CLIENTS ET TRAFIC :
+- Utilisateur.
+- Navigateur.
+- Application mobile.
+- Client API.
+- Générateur de trafic.
+
+RÉSEAU :
+- DNS.
+- CDN.
+- Load Balancer L4.
+- Load Balancer L7.
+- Reverse Proxy.
+- API Gateway.
+- WAF.
+- Firewall.
+- Rate Limiter.
+
+COMPUTE :
+- Serveur applicatif.
+- API Server.
+- Serveur web.
+- Monolithe.
+- Microservice.
+- Worker.
+- Worker Pool.
+- Fonction serverless.
+- Conteneur.
+- Cluster Kubernetes.
+- Autoscaler.
+
+BASES DE DONNÉES :
+- PostgreSQL.
+- MySQL.
+- MongoDB.
+- Cassandra.
+- DynamoDB.
+- CockroachDB.
+- Base clé-valeur.
+- Base de données distribuée.
+- Read Replica.
+- Connection Pool.
+
+CACHE :
+- Redis.
+- Memcached.
+- Cache local.
+- Cache distribué.
+- CDN Cache.
+
+MESSAGERIE :
+- Kafka.
+- RabbitMQ.
+- NATS.
+- Redis Streams.
+- Message Broker.
+- Queue.
+- Producer.
+- Consumer.
+- Consumer Group.
+- Dead Letter Queue.
+- Event Bus.
+
+STOCKAGE :
+- Stockage objet.
+- Stockage de fichiers.
+- Stockage bloc.
+- Volume persistant.
+- Sauvegarde.
+
+RECHERCHE ET DONNÉES :
+- Elasticsearch.
+- OpenSearch.
+- Data Warehouse.
+- Data Lake.
+- ETL Pipeline.
+- CDC.
+
+COMMUNICATION :
+- REST API.
+- GraphQL.
+- gRPC.
+- WebSocket.
+- Webhook.
+- Server-Sent Events.
+
+SÉCURITÉ :
+- Authentification.
+- OAuth 2.0.
+- OpenID Connect.
+- IAM.
+- Gestion des secrets.
+- Gestion des sessions.
+- Service de chiffrement.
+- Audit Logs.
+
+RÉSILIENCE :
+- Retry.
+- Timeout.
+- Circuit Breaker.
+- Bulkhead.
+- Failover.
+- Health Check.
+- Réplication.
+- Stratégie de reprise.
+
+OBSERVABILITÉ :
+- Logs.
+- Métriques.
+- Traces distribuées.
+- OpenTelemetry.
+- Prometheus.
+- Grafana.
+- Alertes.
+
+ARCHITECTURE DISTRIBUÉE :
+- Sharding.
+- Partitionnement.
+- Réplication multi-région.
+- Leader Election.
+- Consensus.
+- Distributed Lock.
+- Service Discovery.
+- Saga.
+- Event Sourcing.
+- CQRS.
+
+TRAITEMENTS DIFFÉRÉS :
+- Job Queue.
+- Cron Scheduler.
+- Task Scheduler.
+- Batch Processing.
+- Workflow Orchestrator.
+
+IA :
+- LLM.
+- Embedding Model.
+- Vector Database.
+- RAG Pipeline.
+- Inference Server.
+- Model Router.
+- Reranker.
+- AI Agent.
+
+SERVICES MÉTIER :
+- Service utilisateur.
+- Service de paiement.
+- Service de notification.
+- Service e-mail.
+- Service SMS.
+- Service de commande.
+- Service de catalogue.
+
+INFRASTRUCTURE :
+- Région cloud.
+- Zone de disponibilité.
+- VPC.
+- Subnet.
+- Machine virtuelle.
+- Managed Database.
+- Object Storage.
+- Serverless Platform.
+
+Tous ces éléments doivent être disponibles dans la bibliothèque,
+mais ils n'ont pas tous besoin d'un moteur de simulation spécialisé
+dans la première version.
+
+Organise le catalogue pour pouvoir ajouter des composants sans
+modifier profondément le code du canvas.
+
+Chaque composant doit posséder :
+- Un identifiant stable.
+- Un nom.
+- Une catégorie.
+- Une icône.
+- Une description.
+- Des ports d'entrée.
+- Des ports de sortie.
+- Un schéma de configuration.
+- Des valeurs par défaut.
+- Des propriétés simulables.
+- Une documentation pédagogique.
+- Un niveau de maturité du simulateur.
+
+Distingue explicitement :
+- Composant entièrement simulé.
+- Composant partiellement modélisé.
+- Composant uniquement visuel ou pédagogique.
+
+Ne fais jamais croire qu'un composant est réellement simulé si
+son comportement n'est pas implémenté.
+
+==================================================
+8. CONFIGURATION DES COMPOSANTS
+==================================================
+
+Lorsqu'un utilisateur clique sur un composant, afficher un panneau
+latéral adapté à son type.
+
+Le panneau comporte trois onglets :
+
+1. Configuration.
+2. Performance.
+3. Apprentissage.
+
+Configuration :
+- Nom.
+- Type.
+- Paramètres techniques.
+- Capacités.
+- Ressources.
+- Limites.
+- Stratégies utilisées.
+
+Performance :
+- Débit.
+- Latence.
+- Utilisation.
+- Erreurs.
+- Files d'attente.
+- Résultats de simulation.
+
+Apprentissage :
+- Rôle.
+- Fonctionnement.
+- Avantages.
+- Inconvénients.
+- Cas d'utilisation.
+- Erreurs fréquentes.
+- Concepts associés.
+
+Ne présente les métriques de performance qu'après une simulation,
+ou indique clairement qu'il s'agit d'estimations initiales.
+
+Exemple de configuration d'un serveur API :
+
+- Nombre d'instances.
+- Capacité par instance.
+- Temps de traitement moyen.
+- Variabilité du temps de traitement.
+- CPU disponible.
+- Mémoire disponible.
+- Nombre maximal de requêtes concurrentes.
+- Nombre maximal de connexions.
+- Politique de répartition.
+- Taux d'erreur éventuel.
+
+Exemple de configuration PostgreSQL :
+
+- Capacité de traitement.
+- Temps de service moyen.
+- Nombre de connexions maximum.
+- Taille des données.
+- Proportion de lectures.
+- Proportion d'écritures.
+- Index.
+- Cache.
+- Réplication.
+- Nombre de réplicas.
+- Politique de réplication.
+- CPU.
+- Mémoire.
+
+Utilise des formulaires validés et des paramètres adaptés à chaque
+composant.
+
+Les valeurs doivent être modifiables et leur signification expliquée.
+
+==================================================
+9. ARCHITECTURE DU MOTEUR DE SIMULATION
+==================================================
+
+C'est la partie technique la plus importante.
+
+Construis un moteur hybride combinant :
+
+A. Calculs mathématiques.
+B. Simulation événementielle.
+
+Sépare le moteur de simulation du code React.
+
+Le moteur doit pouvoir être testé indépendamment de l'interface.
+
+Ne mets pas la logique de calcul directement dans les composants UI.
+
+Architecture logique suggérée :
+
+src/
+  app/
+  components/
+    editor/
+    nodes/
+    panels/
+    simulation/
+    charts/
+    ui/
+  features/
+    architectures/
+    components-library/
+    simulations/
+    learning/
+  engine/
+    graph/
+    math/
+    events/
+    queueing/
+    failures/
+    metrics/
+    diagnostics/
+  lib/
+    validation/
+    persistence/
+  stores/
+  types/
+  tests/
+
+Adapte cette structure à celle du projet existant.
+
+A. MOTEUR MATHÉMATIQUE
+
+Utiliser des calculs déterministes pour estimer :
+- Capacités.
+- Débits.
+- Utilisation des ressources.
+- Latences.
+- Files d'attente simplifiées.
+- Limites de concurrence.
+- Coûts estimés.
+- Propagation des goulots d'étranglement.
+
+B. MOTEUR ÉVÉNEMENTIEL
+
+Simuler :
+- Arrivée des requêtes.
+- Déplacement des requêtes dans le graphe.
+- Traitement par les composants.
+- Files d'attente.
+- Délais de traitement.
+- Délais réseau.
+- Concurrence.
+- Saturation.
+- Erreurs.
+- Timeouts.
+- Pannes.
+- Reprise des services.
+- Retry.
+- Circuit Breaker.
+- Événements asynchrones.
+
+Utilise une horloge virtuelle et une file d'événements ordonnée
+par temps de simulation.
+
+Ne simule pas chaque requête individuelle lorsque le volume rend
+cette approche trop coûteuse.
+
+Prévois plusieurs niveaux de précision :
+
+1. Estimation analytique rapide.
+2. Simulation événementielle avec échantillonnage.
+3. Simulation détaillée pour les scénarios compatibles.
+
+Les résultats doivent préciser le mode utilisé.
+
+C. PROPAGATION DES REQUÊTES
+
+Une requête doit pouvoir traverser plusieurs composants.
+
+Exemple :
+
+Clients
+  -> Load Balancer
+  -> API Servers
+  -> Redis
+  -> PostgreSQL
+
+Le moteur doit :
+- Respecter les connexions du graphe.
+- Calculer les délais de traitement.
+- Tenir compte des capacités.
+- Simuler les files d'attente.
+- Propager les erreurs.
+- Calculer les métriques de bout en bout.
+
+Le moteur doit détecter les cycles dans le graphe.
+
+Les cycles ne doivent pas provoquer de boucle infinie.
+
+Une architecture invalide doit recevoir un diagnostic compréhensible.
+
+D. FILES D'ATTENTE
+
+Modéliser au minimum :
+- Capacité de service.
+- Nombre de workers.
+- Temps de service.
+- Nombre de requêtes en attente.
+- Saturation.
+- Temps d'attente.
+- Rejets lorsque les limites sont atteintes.
+
+Évite les formules simplistes lorsque leurs hypothèses ne sont
+pas satisfaites.
+
+Par exemple, une approximation de file d'attente ne doit pas être
+présentée comme fiable lorsque le système est instable.
+
+E. LATENCE
+
+Distinguer :
+- Latence réseau.
+- Temps de traitement.
+- Temps d'attente.
+- Latence totale.
+- Moyenne.
+- p50.
+- p95.
+- p99.
+
+Les percentiles doivent être calculés à partir de données simulées
+appropriées ou d'une approximation explicitement documentée.
+
+Ne calcule pas le p95 en multipliant arbitrairement la moyenne.
+
+F. CAPACITÉ ET SATURATION
+
+Calculer les limites en fonction des paramètres du composant.
+
+Une saturation doit avoir des conséquences cohérentes :
+- Augmentation de la file d'attente.
+- Augmentation de la latence.
+- Rejets.
+- Timeouts.
+- Propagation de la surcharge.
+
+G. RÉPPLICATION ET CACHE
+
+Implémenter progressivement les modèles de :
+- Cache hit et cache miss.
+- Politiques de cache.
+- Réplication en lecture.
+- Réplication en écriture.
+- Latence de réplication.
+- Capacité des réplicas.
+
+Documenter les hypothèses de chaque modèle.
+
+H. PANNES
+
+Permettre de configurer :
+- Début de la panne.
+- Durée.
+- Composant concerné.
+- Indisponibilité complète ou dégradation.
+- Temps de récupération.
+
+Observer les conséquences sur les composants dépendants.
+
+I. REPRODUCTIBILITÉ
+
+Permettre de configurer une seed aléatoire.
+
+À paramètres et seed identiques, les résultats doivent être
+reproductibles autant que possible.
+
+J. MÉTRIQUES
+
+Produire :
+- Débit entrant.
+- Débit traité.
+- Latence.
+- Erreurs.
+- Rejets.
+- CPU estimé.
+- Mémoire estimée.
+- Longueur des files.
+- Temps d'attente.
+- Disponibilité simulée.
+- Coût estimé.
+
+Chaque métrique doit avoir une définition claire.
+
+Ne mélange pas les unités.
+
+==================================================
+10. SCÉNARIOS DE TRAFIC
+==================================================
+
+Créer une interface de configuration du trafic.
+
+Paramètres :
+
+- Utilisateurs actifs.
+- Requêtes par seconde.
+- Durée de simulation.
+- Taille des requêtes.
+- Proportion lecture/écriture.
+- Latence réseau.
+- Taux d'erreur initial.
+- Profil de trafic.
+- Seed aléatoire.
+- Budget cible.
+
+Profils :
+- Constant.
+- Progressif.
+- Pic soudain.
+- En vagues.
+- Aléatoire.
+- Personnalisé.
+
+Modes :
+- Test rapide.
+- Test de charge.
+- Test de stress.
+- Test d'endurance.
+- Test de panne.
+
+Les utilisateurs actifs et les requêtes par seconde ne sont pas
+la même chose.
+
+L'interface doit expliquer cette différence.
+
+La simulation doit pouvoir fonctionner sans backend distant dans
+la première version.
+
+Pour les calculs coûteux, envisager un Web Worker afin de ne pas
+bloquer l'interface.
+
+Afficher une progression et permettre d'interrompre le calcul.
+
+==================================================
+11. DIAGNOSTICS INTELLIGENTS
+==================================================
+
+Créer un moteur de diagnostic basé sur des règles explicites
+et sur les métriques produites par le simulateur.
+
+Ne rends pas l'utilisation d'une API d'IA obligatoire pour
+obtenir des diagnostics corrects.
+
+Exemples de règles :
+
+- Saturation d'un composant.
+- File d'attente qui augmente.
+- Dépendance critique sans redondance.
+- Base de données trop sollicitée.
+- Cache peu efficace.
+- Trop de connexions concurrentes.
+- Risque de cascade de timeouts.
+- Composant isolé.
+- Connexion invalide.
+- Architecture impossible à simuler correctement.
+
+Chaque diagnostic contient :
+
+- Gravité.
+- Composant concerné.
+- Métriques justificatives.
+- Cause probable.
+- Explication pédagogique.
+- Solutions possibles.
+- Compromis.
+- Limites de la recommandation.
+
+Exemple :
+
+"PostgreSQL devient le principal goulot d'étranglement."
+
+Afficher les métriques qui justifient cette conclusion.
+
+Puis proposer plusieurs pistes :
+- Optimiser les requêtes.
+- Ajouter un cache.
+- Augmenter la capacité.
+- Introduire des réplicas de lecture.
+
+Préciser les conditions dans lesquelles chaque solution est utile.
+
+Ne recommande pas automatiquement un réplica de lecture pour
+résoudre une surcharge principalement liée aux écritures.
+
+==================================================
+12. RÉSULTATS DE SIMULATION
+==================================================
+
+Créer une page de résultats comprenant :
+
+- Débit.
+- Latence moyenne.
+- p50.
+- p95.
+- p99.
+- Taux d'erreur.
+- Requêtes rejetées.
+- Utilisation maximale.
+- Files d'attente.
+- Disponibilité simulée.
+- Coût estimé.
+
+Créer des graphiques temporels.
+
+Afficher une vue de l'architecture avec les résultats superposés.
+
+Mettre en évidence :
+- Les composants saturés.
+- Les connexions dégradées.
+- Les files d'attente importantes.
+- Les erreurs.
+- Les pannes.
+
+Ajouter une section de diagnostic.
+
+Afficher les hypothèses utilisées.
+
+Ajouter un bouton pour revenir à l'éditeur.
+
+Ajouter un bouton pour relancer la simulation.
+
+Les données doivent provenir du moteur de simulation.
+
+Ne remplis pas les graphiques avec des nombres aléatoires uniquement
+pour donner l'impression que le système fonctionne.
+
+Les données de démonstration doivent être séparées des résultats
+calculés et clairement identifiées.
+
+==================================================
+13. COMPARAISON D'ARCHITECTURES
+==================================================
+
+Permettre de comparer deux versions d'une architecture.
+
+Exemple :
+
+Version A :
+Load Balancer -> API Servers -> PostgreSQL.
+
+Version B :
+Load Balancer -> API Servers -> Redis -> PostgreSQL.
+
+Exécuter les simulations avec des paramètres comparables.
+
+Comparer :
+- Throughput.
+- Latence.
+- Taux d'erreur.
+- Utilisation.
+- Files d'attente.
+- Coût.
+- Disponibilité simulée.
+
+Afficher les différences et les compromis.
+
+L'utilisateur doit pouvoir modifier une architecture et conserver
+une version précédente pour comparaison.
+
+==================================================
+14. SAUVEGARDE ET PERSISTANCE
+==================================================
+
+Implémenter :
+- Création d'architecture.
+- Renommage.
+- Sauvegarde.
+- Chargement.
+- Duplication.
+- Suppression.
+- Historique des simulations.
+- Restauration de versions si possible.
+
+Utiliser un modèle de données versionné.
+
+Une architecture sauvegardée doit conserver :
+- Les nœuds.
+- Leurs configurations.
+- Les connexions.
+- Les paramètres du scénario.
+- Les métadonnées.
+
+Une simulation doit conserver :
+- La version de l'architecture.
+- Les paramètres du scénario.
+- La seed.
+- La version du moteur.
+- Les métriques.
+- Les diagnostics.
+- Les hypothèses.
+
+Ne sauvegarde pas uniquement le résultat affiché à l'écran.
+
+Prévois une interface de stockage indépendante pour pouvoir passer
+ultérieurement du stockage local à une base de données.
+
+==================================================
+15. MODÈLES PRÉCONFIGURÉS
+==================================================
+
+Créer des modèles d'architecture :
+
+- API simple.
+- Architecture à trois niveaux.
+- API scalable.
+- Application de messagerie.
+- Marketplace.
+- Système de paiement.
+- Plateforme de notifications.
+- Plateforme vidéo.
+- Architecture événementielle.
+- Architecture multirégion.
+- Application IA avec RAG.
+
+L'utilisateur peut :
+- Explorer le modèle.
+- Le charger dans le canvas.
+- Le modifier.
+- Le sauvegarder sous un nouveau nom.
+
+Les modèles doivent être de véritables graphes valides,
+et pas seulement des images statiques.
+
+==================================================
+16. APPRENTISSAGE
+==================================================
+
+Créer un parcours pédagogique progressif.
+
+Débutant :
+- Client-serveur.
+- HTTP.
+- API.
+- Bases de données.
+- Cache.
+- Load Balancing.
+- Latence et débit.
+
+Intermédiaire :
+- Scaling horizontal.
+- Réplication.
+- Sharding.
+- Message Queues.
+- Asynchronisme.
+- Rate Limiting.
+- Résilience.
+- Observabilité.
+
+Avancé :
+- Cohérence distribuée.
+- Consensus.
+- CAP Theorem.
+- CQRS.
+- Event Sourcing.
+- Saga.
+- Multi-région.
+- Gestion des pannes.
+
+Chaque module doit proposer :
+- Explication.
+- Schéma.
+- Exemple.
+- Exercice.
+- Simulation.
+- Quiz.
+- Résumé.
+
+Les exercices doivent être reliés au moteur de simulation.
+
+Exemple :
+Un exercice demande de réduire la latence p95 tout en respectant
+un budget donné.
+
+La plateforme évalue les résultats à partir des métriques simulées.
+
+Il peut exister plusieurs solutions acceptables.
+
+==================================================
+17. SÉCURITÉ ET QUALITÉ
+==================================================
+
+Même si la première version est locale, adopte de bonnes pratiques.
+
+- Valider les configurations avec Zod.
+- Éviter l'exécution de code utilisateur arbitraire.
+- Ne pas exécuter de commandes système issues des composants.
+- Limiter le nombre de nœuds simulables.
+- Limiter la durée maximale d'une simulation.
+- Éviter les boucles infinies.
+- Prévenir les calculs excessifs.
+- Gérer les erreurs proprement.
+- Ne jamais exposer de secrets côté client.
+- Ne pas faire confiance aux paramètres venant du navigateur.
+- Nettoyer les ressources des Web Workers.
+- Prévoir des limites de mémoire et de temps.
+
+Les tests de sécurité de la plateforme doivent être simulés dans
+le moteur pédagogique.
+
+Ne prétends pas effectuer de véritables audits de sécurité de systèmes
+externes.
+
+Ne génère pas de trafic d'attaque vers des services tiers.
+
+==================================================
+18. PERFORMANCE ET ROBUSTESSE
+==================================================
+
+L'éditeur doit rester fluide même avec plusieurs dizaines de nœuds.
+
+- Éviter les re-renders inutiles.
+- Utiliser des sélecteurs Zustand adaptés.
+- Séparer le moteur de simulation de React.
+- Éviter de recalculer toutes les métriques à chaque frappe.
+- Utiliser un Web Worker pour les simulations suffisamment coûteuses.
+- Permettre d'arrêter une simulation.
+- Afficher les erreurs et les états de chargement.
+- Utiliser des types TypeScript stricts.
+- Éviter les dépendances inutiles.
+- Ne pas utiliser de gros composants monolithiques.
+
+Ne crée pas un fichier unique contenant toute l'application.
+
+Organise le code en modules cohérents.
+
+==================================================
+19. TESTS OBLIGATOIRES
+==================================================
+
+Écrire des tests unitaires pour :
+
+- Création de nœuds.
+- Connexions.
+- Validation des graphes.
+- Paramètres invalides.
+- Calcul de capacité.
+- Calcul de latence.
+- Saturation.
+- Files d'attente.
+- Propagation des erreurs.
+- Pannes.
+- Reprise.
+- Cache.
+- Réplication.
+- Reproductibilité.
+- Diagnostics.
+
+Écrire des tests d'intégration pour :
+- Sauvegarder une architecture.
+- Recharger une architecture.
+- Modifier les paramètres.
+- Lancer une simulation.
+- Afficher les résultats.
+
+Écrire des tests Playwright pour le parcours principal :
+
+1. Ouvrir l'éditeur.
+2. Ajouter un Load Balancer.
+3. Ajouter trois API Servers.
+4. Ajouter Redis.
+5. Ajouter PostgreSQL.
+6. Connecter les composants.
+7. Configurer le scénario.
+8. Lancer la simulation.
+9. Consulter les résultats.
+10. Identifier un goulot d'étranglement.
+11. Modifier l'architecture.
+12. Relancer la simulation.
+
+Le parcours doit fonctionner réellement.
+
+==================================================
+20. CRITÈRES D'ACCEPTATION
+==================================================
+
+Le travail ne peut pas être considéré comme terminé si l'application
+est uniquement visuellement convaincante.
+
+La première version fonctionnelle doit permettre de :
+
+1. Construire une architecture visuelle.
+2. Ajouter et connecter les composants.
+3. Modifier leurs propriétés.
+4. Sauvegarder et recharger une architecture.
+5. Configurer un scénario de trafic.
+6. Lancer une simulation réelle dans le moteur interne.
+7. Produire des métriques cohérentes.
+8. Détecter des goulots d'étranglement.
+9. Simuler au moins un scénario de panne.
+10. Afficher des diagnostics justifiés.
+11. Modifier l'architecture.
+12. Comparer les résultats avant et après modification.
+13. Consulter les explications pédagogiques.
+14. Exécuter les tests principaux sans erreur.
+
+Pour la V1, implémente complètement les modèles des composants
+les plus importants avant d'étendre la bibliothèque.
+
+Priorité de simulation :
+- Générateur de trafic.
+- Load Balancer.
+- API Server.
+- Cache.
+- PostgreSQL.
+- Message Queue.
+- Worker.
+- Réplica de lecture.
+- Rate Limiter.
+- Circuit Breaker.
+
+Les autres composants doivent pouvoir être ajoutés progressivement.
+
+Pour chaque composant non encore simulé, afficher explicitement
+son niveau de prise en charge.
+
+==================================================
+21. MÉTHODE DE TRAVAIL
+==================================================
+
+Travaille par étapes.
+
+ÉTAPE 1 :
+Inspecter le dépôt et identifier les contraintes techniques.
+
+ÉTAPE 2 :
+Mettre en place le design system et la structure des pages.
+
+ÉTAPE 3 :
+Créer l'éditeur React Flow avec les panneaux.
+
+ÉTAPE 4 :
+Créer la bibliothèque de composants extensible.
+
+ÉTAPE 5 :
+Créer les modèles de données et la persistance.
+
+ÉTAPE 6 :
+Implémenter le moteur de simulation indépendant de l'interface.
+
+ÉTAPE 7 :
+Créer les graphiques et les résultats.
+
+ÉTAPE 8 :
+Créer le moteur de diagnostic.
+
+ÉTAPE 9 :
+Créer les modèles et les exercices.
+
+ÉTAPE 10 :
+Écrire les tests et corriger les problèmes.
+
+ÉTAPE 11 :
+Vérifier l'application en conditions réelles d'utilisation locale.
+
+Après chaque étape :
+- Vérifier le code.
+- Exécuter les tests concernés.
+- Corriger les erreurs.
+- Vérifier que les fonctionnalités précédentes continuent de marcher.
+
+Ne prétends pas qu'un test a réussi s'il n'a pas été exécuté.
+
+Ne supprime pas une fonctionnalité existante sans justification.
+
+Ne remplace pas les fonctionnalités demandées par des placeholders.
+
+Si une fonctionnalité est trop complexe pour être terminée immédiatement,
+implémente une version minimale réellement fonctionnelle, documente
+ses limites et garde une architecture permettant de l'améliorer.
+
+==================================================
+22. LIVRABLE FINAL
+==================================================
+
+À la fin, fournir :
+
+- Une application Next.js fonctionnelle.
+- Une interface fidèle à la maquette.
+- Un éditeur visuel opérationnel.
+- Une bibliothèque de composants.
+- Un moteur de simulation hybride.
+- Des résultats calculés.
+- Des diagnostics explicables.
+- Des modèles d'architectures.
+- Une première expérience pédagogique.
+- Des tests automatisés.
+- Un README avec les instructions d'installation et d'exécution.
+- Une documentation expliquant le moteur de simulation.
+- Une liste honnête des fonctionnalités terminées et des limites.
+
+Commence maintenant par inspecter le dépôt, puis implémente le produit.
+
+Ne t'arrête pas à la conception théorique.
+Ne livre pas seulement une maquette.
+Construis une première version réellement utilisable de SystemLab.

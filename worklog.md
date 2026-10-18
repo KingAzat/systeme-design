@@ -1,0 +1,242 @@
+# SystemLab — Worklog partagé
+
+Projet : plateforme interactive d'apprentissage et de simulation du System Design.
+Stack : Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS 4, shadcn/ui, @xyflow/react 12, Recharts, Zustand, Zod, Prisma (SQLite), Lucide.
+
+**CONTRAINTE MAJEURE** : l'utilisateur ne voit QUE la route `/` (src/app/page.tsx).
+L'application est une SPA mono-route : les "vues" (landing, dashboard, éditorial, résultats, comparaison, modèles, apprentissage, historique, paramètres) sont gérées côté client par Zustand (`AppView` dans src/types/index.ts).
+
+## Palette SystemLab (déjà installée dans globals.css)
+
+- Fond `#F7F8FA` / surfaces `#FFFFFF` / texte `#17202A` / secondaire `#64748B` / bordures `#E2E8F0`
+- **Primaire indigo `#4F46E5`** (dark `#6366F1`) — demandé explicitement par la spec produit
+- Succès `#16A34A`, Avertissement `#D97706`, Erreur `#DC2626`, Info `#0284C7`
+- Tokens shadcn : `bg-primary`, `text-muted-foreground`, `border-border`… + tokens custom `text-success`, `bg-warning`, `text-info`, etc.
+- Mode sombre fonctionnel (next-themes, classe `.dark`)
+
+## Contrat de types — src/types/index.ts (SOURCE DE VÉRITÉ, NE PAS MODIFIER sans accord)
+
+Types clés : `CatalogComponent` (catalogue), `ArchNode/ArchEdge/ArchZone/ScenarioConfig/ArchitectureData` (graphe), `NodeMetrics/SimulationSeries/OverallMetrics/Diagnostic/SimulationResult` (résultats), `ArchitectureTemplate/Course` (contenus), `AppView`.
+
+## Fichiers déjà en place (tâche 1 — orchestrateur)
+
+- `src/app/globals.css` : thème SystemLab clair/sombre + scrollbars + surcharges React Flow
+- `src/app/layout.tsx` : lang fr, ThemeProvider (next-themes), Toaster sonner
+- `src/components/theme-provider.tsx`
+- `src/types/index.ts` : contrat complet
+- `src/lib/icons.ts` : registre LUCIDE_ICONS (noms vérifiés), `getIcon(name)`, `getCategoryStyle(categoryId)` (couleurs par catégorie)
+- `src/lib/format.ts` : formatRps/formatMs/formatPercent/formatCost/formatRequests/timeAgo/formatDateTime/shortId/clamp
+- `src/lib/validation.ts` : schémas Zod (architectureDataSchema, createArchitectureSchema, updateArchitectureSchema, createSimulationSchema, scenarioSchema…)
+- `prisma/schema.prisma` : models `Architecture` (id, name, description, data JSON, timestamps, simulations[]) et `SimulationRecord` (id, label?, architectureId FK cascade, engineVersion, mode, seed, scenario JSON, result JSON, createdAt). DB poussée (`db/custom.db`).
+- `src/lib/db.ts` : client Prisma (`db`)
+
+## Conventions
+
+- Notifications : `import { toast } from "sonner"` (Toaster déjà monté dans layout).
+- Icônes catalogue : chaîne PascalCase résolue via `getIcon()` de `@/lib/icons.ts`. **Seuls les noms présents dans LUCIDE_ICONS sont autorisés.**
+- Formatage : fonctions de `@/lib/format.ts`.
+- Composants shadcn/ui : dossier `src/components/ui` (New York). `cn()` via `@/lib/utils`.
+- Store Zustand : `useXStore` avec sélecteurs fins. Persist localStorage via `persist` pour préférences (favoris, thème par défaut…).
+- API : routes App Router `src/app/api/**` avec validation Zod systématique. Le client appelle des chemins relatifs (`fetch('/api/architectures')`).
+- FR partout, termes techniques anglais admis (Load Balancer, Cache hit…).
+- Desktop prioritaire, responsive requis (mobile : panneaux repliables). Footer sticky uniquement sur landing (mt-auto, min-h-screen flex flex-col).
+- Pas de code de test (contrainte environnement).
+- Ne JAMAIS écraser les fichiers des autres agents : chacun respecte son périmètre (voir sections).
+
+## Plan d'exécution
+
+1. [terminé] Orchestrateur : setup, thème, types, prisma, icons, format, validation
+2-a. Catalogue de composants + templates + cours (data pures) — agent `data-catalog`
+2-b. Moteur de simulation hybride (TS pur, sans React) — agent `engine-builder`
+3. API routes + persistance + app-store + shell page — orchestrateur
+4-a. Éditeur React Flow complet — agent `editor-builder`
+4-b. Résultats / comparaison / historique — agent `results-builder`
+4-c. Landing / dashboard / modèles / apprentissage / paramètres — agent `views-builder`
+5. Intégration, lint, vérification navigateur — orchestrateur
+
+---
+Task ID: 1
+Agent: orchestrateur (principal)
+Task: Setup initial SystemLab
+
+Work Log:
+- Inspecté le dépôt Next.js 16 existant (shadcn complet, Prisma, Zustand, Recharts, Zod déjà présents)
+- Installé @xyflow/react@12.12.0
+- Écrit globals.css (palette SystemLab clair/sombre, scrollbars, surcharges React Flow)
+- Écrit layout.tsx (fr, next-themes, sonner) + theme-provider.tsx
+- Défini le contrat de types complet src/types/index.ts
+- Créé src/lib/icons.ts (registre d'icônes vérifiées), src/lib/format.ts, src/lib/validation.ts
+- Schéma Prisma Architecture/SimulationRecord + db push + generate OK
+- Arborescence créée : src/{data,engine,stores}, src/components/{editor,results,compare,history,landing,dashboard,templates,learn,settings}, src/app/api/architectures/[id]/duplicate, src/app/api/simulations/[id]
+
+Stage Summary:
+- Fondations prêtes ; agents 2-a et 2-b peuvent démarrer en parallèle
+- Contrat : types/index.ts + icons.ts + format.ts + validation.ts
+- Base SQLite synchronisée (db/custom.db)
+
+---
+Task ID: 2-a
+Agent: data-catalog
+Task: Catalogue, templates et parcours d'apprentissage (complétion)
+
+Work Log:
+- Lu worklog + périmètre ; inspecté types, catalogue (cœur + 18 catégories étendues), templates, icons
+- src/data/templates.ts : corrigé l'import manquant du type `ArchZone` depuis `@/types` (seule erreur TS du fichier)
+- Créé src/data/courses.ts : 23 cours FR (7 débutant / 8 intermédiaire / 8 avancé), sections techniques réelles (150-400 caractères), 3 concepts+ par cours, quiz de 3 questions avec explications, 15 exercices practice branchés sur les templates (templateId vérifiés, métriques p95Ms/errorRate/servedRps/cacheHitRate, valeurs réalistes) + helpers COURSE_MAP / getCourseBySlug / getCoursesByLevel / COURSES_WITH_EXERCISE
+- Écrit tmp-verify.ts et exécuté via bun (résout les alias @/) : composants, icônes ∈ LUCIDE_ICONS, alignement fields↔defaults (types inclus, options select), ports ∈ {0,1}, componentId des templates ∈ COMPONENT_MAP, zoneId référencés, catégories ≥ 2 composants, intégrité des 23 cours (bornes sections/quiz/critères)
+- Corrections issues de la vérification : zones « Serveurs applicatifs » (three-tier) et « Chemin asynchrone » (messagerie-app) non référencées → zoneId ajoutés sur les nœuds concernés (n3/n4 et n3/n4/n5)
+- tmp-verify.ts supprimé après usage
+- Vérification finale : `bunx tsc --noEmit` → plus aucune erreur dans src/data/** ; seules restent des erreurs src/engine/metrics.ts (périmètre engine-builder, non touchées)
+
+Stage Summary:
+- 130 composants en 18 catégories (toutes ≥ 4 composants, icônes et champs valides)
+- 11 templates d'architecture + DEFAULT_SCENARIO (graphes validés : componentId, edges, zones)
+- 23 cours (7/8/8 par niveau) avec 15 exercices practice sur 8 templates distincts
+- Contrat de types respecté sans modification de src/types/index.ts
+
+---
+Task ID: 2-b
+Agent: engine-builder
+Task: Moteur de simulation hybride (analytique + événementiel, pannes, diagnostics)
+
+Work Log:
+- Créé src/engine/ : rng.ts (PRNG mulberry32 seedé + gaussienne), events.ts (tas binaire), queueing.ts (Erlang C / Kingman / M/G/c), failures.ts (outage/degradation/ramp de récupération), cost.ts (coûts mensuels estimés), graph.ts (index, cycles, analyzeGraph), runtime.ts (config par rôle, capacités théoriques, profils de trafic, token bucket, types d'exécution), metrics.ts (MetricsStore : compteurs, séries bucketisées, percentiles)
+- Créé handlers.ts (rôles : generator/cdn/balancer/rate-limiter/server/cache/database/replica/queue/worker/circuit-breaker/proxy/storage/pass-through, timeout sous-arbre, write-around, failover health-check, MAX_HOPS anti-cycle), diagnostics.ts (13+ règles pédagogiques avec solutions adaptées au mix lecture/écriture), estimate.ts (mode analytique), simulate.ts (runSimulation découpée/annulable/progression, échantillonnage ≤100k événements, agrégation, hypothèses), index.ts (barrel public)
+- Smoke test exécuté (par l'orchestrateur) : SUCCÈS complet — nominal 503.5 req/s servis, p50=142/p95=185/p99=204 ms, déterminisme strict (seed 42), AbortError OK, panne LB → dispo 66.7 % + failover healthCheck → dispo 99.81 % (28 erreurs vs 5033), saturation 5000 rps → util 100 %, file 500, 2797 req/s rejetés, diagnostic « Saturation critique », samplingRate 0.667, estimation analytique 6 nœuds
+- Fichiers temporaires de test supprimés
+
+Stage Summary:
+- API publique : runSimulation(arch, opts?) / estimateArchitecture(arch) / analyzeGraph(arch) / ENGINE_VERSION "1.0.0"
+- Tous les types de @/types respectés ; tsc sans erreur dans src/engine
+- Comportements vérifiés : propagation bout-en-bout, files, concurrence, connexions DB, cache hit/miss fetch-through, répartition LB, token bucket, circuit breaker, pannes avec récupération progressive, échantillonnage, reproductibilité seed
+
+---
+Task ID: 3
+Agent: orchestrateur (principal)
+Task: API routes, persistance, app-store, shell
+
+Work Log:
+- API routes créées : /api/architectures (GET liste, POST création), /api/architectures/[id] (GET/PATCH/DELETE), /api/architectures/[id]/duplicate (POST), /api/simulations (GET liste avec filtre architectureId, POST archivage), /api/simulations/[id] (GET complet/DELETE), /api/health. Validation Zod systématique, erreurs JSON propres, force-dynamic.
+- src/lib/persistence.ts : façade ArchitectureStore/SimulationStore (implémentation API Prisma) — couche échangeable vers DB distante/auth sans toucher l'UI.
+- src/stores/app-store.ts : navigation SPA (activeView + viewHistory + goBack), passerelles inter-vues (openEditorWithCommand/openTemplate/openArchitecture/newArchitecture/openResult/openCompare/openCourse), listes architectures/simulations avec refresh, CRUD délégués au storage, VIEW_LABELS, getTemplateById.
+- Route /api hello-world de démo supprimée.
+
+Stage Summary:
+- Backend complet et opérationnel ; contrats UI ci-dessous verrouillés pour les agents 4-a/4-b/4-c.
+
+## CONTRAT D'INTÉGRATION UI (verrouillé — agents 4-a/4-b/4-c)
+
+Chaque vue est un composant client SANS PROPS qui tire son état des stores :
+- `src/components/landing/landing-view.tsx` → `export function LandingView()`
+- `src/components/dashboard/dashboard-view.tsx` → `export function DashboardView()`
+- `src/components/editor/editor-view.tsx` → `export function EditorView()` (l'état canvas vit dans src/stores/editor-store.ts, la simulation dans src/stores/simulation-store.ts, les favoris/récents dans src/stores/library-store.ts — créés par l'agent 4-a)
+- `src/components/results/results-view.tsx` → `export function ResultsView()` (lit useAppStore().currentResult)
+- `src/components/compare/compare-view.tsx` → `export function CompareView()` (lit compareA/compareB ; si absents → sélecteur via storage.simulations)
+- `src/components/history/history-view.tsx` → `export function HistoryView()`
+- `src/components/templates/templates-view.tsx` → `export function TemplatesView()`
+- `src/components/learn/learn-view.tsx` → `export function LearnView()` (activeCourseSlug dans app-store)
+- `src/components/settings/settings-view.tsx` → `export function SettingsView()`
+
+### Contrat simulation-store (implémenté par 4-a, consommé par 4-b) :
+```ts
+interface SimulationState {
+  status: "idle" | "running" | "done" | "error";
+  progress: SimulationProgress | null;
+  error: string | null;
+  result: SimulationResult | null;
+  run(arch: ArchitectureData, architectureId: string | null): Promise<void>;
+  abort(): void;
+  reset(): void;
+}
+```
+`run()` : passe status running (progress via onProgress), exécute `runSimulation` de `@/engine`, sur succès : enrichit le résultat (id=shortId, architectureId réel ou "local"), persiste un SimulationRecord via `storage.simulations.create` (best-effort si architectureId non null), appelle `useAppStore.getState().openResult(result)` et refreshSimulations(), status done. Sur AbortError → status idle sans erreur. Sur autre erreur → status error + message.
+"Relancer" depuis résultats : `run({ name: r.architectureName, nodes: r.snapshot.nodes, edges: r.snapshot.edges, zones: r.snapshot.zones, scenario: r.scenario }, r.architectureId !== "local" ? r.architectureId : null)`.
+
+### Règles d'or UI
+- Palette et tokens : voir section « Palette SystemLab » en tête de worklog. Primary indigo #4F46E5 AUTORISÉ (spéc produit explicite).
+- Composants shadcn/ui de `@/components/ui` uniquement (pas de HTML brut pour les contrôles), icônes via getIcon/CATEGORY_STYLES de `@/lib/icons`, formatage via `@/lib/format`, toasts via sonner.
+- React Flow : CSS `@xyflow/react/dist/style.css` importé dans le composant canvas.
+- React Flow n'est PAS utilisé dans les vues résultats/compare/history (utiliser Recharts + SVG/div).
+- Navigation : TOUJOURS via useAppStore (setView/openTemplate/…) — jamais de <Link> ou router.
+
+---
+Task ID: 4-c
+Agent: views-builder
+Task: Landing, Dashboard, Modèles, Apprentissage, Paramètres
+
+Work Log:
+- Lu worklog complet + contrat d'intégration UI ; inspecté types, app-store, persistence, format, icons, catalog/registry, templates (11), courses (23), composants shadcn disponibles et palette globals.css
+- Créé les helpers partagés : learn/level-badge.tsx (badges niveau/difficulté success/warning/destructive outline), learn/learned-courses.ts (progression localStorage "systemlab-learned" exposée comme store externe useSyncExternalStore — snapshot serveur vide, synchronisation multi-vues par événement custom), templates/template-preview.tsx (aperçu SVG statique généré depuis template.data : bounding box nœuds+zones → viewBox, zones pointillées teintées, nœuds = petits rects + point coloré par catégorie (hex fixes), arêtes coupées aux bordures avec flèches via marker à id sanitizé)
+- landing-view.tsx : hero py-16 (badge pill FlaskConical, H1 « Concevez. Simulez. Comprenez. » avec « Simulez. » en primary, value prop, CTA Play→newArchitecture + outline LayoutGrid→setView("templates")), illustration SVG inline codée à la main (6 rects, flèches orthogonales, badges « 3 500 req/s »/« 800 req/s », zone Backend pointillée, point rouge goulot « utilisation 82 % », couleurs via classes fill-*/stroke-* → dark mode automatique), 6 cartes fonctionnalités avec compteurs RÉELS importés (COMPONENTS.length=130, COURSES.length=23, TEMPLATES.length=11), 3 étapes numérotées, bande finale CTA, footer sticky mt-auto (2 lignes + liens discrets filés vers learn/templates/settings)
+- dashboard-view.tsx : refresh initial si listes vides (getState, catch+toast) ; 4 stats (Boxes/Activity/Timer p95 moyen 10 dernières/HeartPulse dispo moyenne, formatMs/formatPercent, « — » si vide) ; démarrage rapide avec les 4 templates clés (icônes fixes Server/Layers/Network/Bot + LevelBadge + openTemplate) ; « Mes architectures » (max-h-96 scroll : nom, N composants, timeAgo ; actions Ouvrir/Dupliquer+toast/Renommer via Dialog+Input→storage.architectures.update+refresh+toast/Supprimer via AlertDialog) ; état vide avec CTA nouveau+modèles ; « Dernières simulations » (8 max : mode badge Analytique/Événementiel, formatRps, p95, errorRate, « Voir »→storage.simulations.get→openResult avec spinner Loader2, bouton historique→setView("history")) ; « Parcours suggéré » (3 cours non terminés via useLearnedCourses, Clock+LevelBadge, clic→openCourse(slug)+setView("learn"))
+- templates-view.tsx : en-tête + sous-titre dynamique (11 architectures) ; grille 1/2/3 colonnes de cartes (aperçu TemplatePreview 140px bg-muted/40, badge difficulté coloré, description line-clamp-2, tags outline, footer « N composants · M connexions » + bouton « Utiliser ce modèle ») ; clic carte → Dialog détail : aperçu 240px avec libellés de zones, composants groupés par componentId (icône getIcon + style catégorie + badge maturité Simulé/Partiel/Visuel), scénario par défaut résumé (rps/durée/mode/seed), boutons « Utiliser dans l'éditeur » et « Voir les cours liés (N) » (comptage des exercise.templateId correspondants)
+- learn-view.tsx : liste (en-tête, carte progression locale avec Progress + « X / 23 cours terminés », 3 sections par niveau avec icônes Rocket/Gauge/Radar + LevelBadge + description, cartes cours avec Clock durée, badge « Exercice » (Target), summary, concepts 3 max + « +N », check vert si terminé) ; détail (fil d'Ariane ChevronLeft→openCourse(null), badges niveau/durée/exercice/terminé, sections numérotées avec rendu paragraphes + listes « - », concepts en badges secondary, quiz interactif une correction immédiate vert/rouge + explication + score final X/N + Recommencer, exercice en Card border-primary/30 : contraintes, critères formatés par métrique (« p95 ≤ 600 ms », « taux d'erreur ≤ 5 % », « débit servi ≥ 2 500 req/s », « coût ≤ 500 $/mois ») via formatMs/formatPercent/formatRps/formatCost, bouton « Ouvrir l'exercice dans l'éditeur »→openTemplate(templateId, exercise.title) + rappel d'évaluation, bouton « Marquer comme terminé » (toggle localStorage), navigation précédent/suivant au sein du niveau ; remontage par key={slug} pour réinitialiser le quiz sans effet)
+- settings-view.tsx : Apparence (3 cartes Clair/Sombre/Système via useTheme, état actif ring primary, garde mounted anti-flash) ; Préférences (enregistrées localement) — durée/rps/seed/budget en Input number + mode en Select, clé localStorage "systemlab-settings", défauts calés sur DEFAULT_SCENARIO, intitulé honnête ; Données (export Blob systemlab-export.json avec architectures complètes via storage.architectures.get, import fichier JSON validé forme par forme → create + refresh + toast compteur, compteur N architectures · M simulations) ; Zone sensible destructive outline avec double AlertDialog (intention puis confirmation finale, boucle deleteArchitecture + toasts) ; À propos (version 1.0.0, stack, limites honnêtes du moteur 60 nœuds/600 s/échantillonnage 100k/composants visuels, lien « Voir les hypothèses du moteur »→toast)
+- Refactor eslint react-hooks/set-state-in-effect : progression passée en useSyncExternalStore (synchronisation dashboard↔apprentissage), quiz réinitialisé par key au lieu d'un effet
+- Vérifications : `bunx tsc --noEmit` → 0 erreur dans src/components/{landing,dashboard,templates,learn,settings} (erreurs restantes = compare-view/editor des agents 4-b/4-a, hors périmètre) ; eslint → 0 error/0 warning sur les 8 fichiers ; compteurs vérifiés par script bun (130 composants, 23 cours, 11 modèles, 15 exercices, 4 ids quick-start présents)
+
+Stage Summary:
+- 8 fichiers produits : landing/landing-view.tsx, dashboard/dashboard-view.tsx, templates/templates-view.tsx, templates/template-preview.tsx, learn/learn-view.tsx, learn/learned-courses.ts, learn/level-badge.tsx, settings/settings-view.tsx
+- 5 vues conformes au contrat (composants client sans props, navigation exclusive via useAppStore, stores en lecture + actions existantes, aucun store modifié)
+- Décisions : SVG statiques inline (React Flow réservé à l'éditeur), progression pédagogique en mini-store externe localStorage partagé dashboard/apprentissage, renommage via storage.architectures.update (pas d'action store dédiée), chiffres d'affichage toujours calculés depuis les données importées (jamais codés en dur)
+- À intégrer par l'orchestrateur (étape 5) : brancher les 5 vues dans le shell page.tsx selon activeView
+
+---
+Task ID: 4-b
+Agent: results-builder
+Task: Vues Résultats (KPIs, graphiques, heatmap, diagnostics), Comparaison A/B, Historique
+
+Work Log:
+- Lu worklog + contrat UI ; inspecté types, app-store, persistence, format, icons, engine/metrics (shape réel des séries : clés nodeId dynamiques, 5 max dans queues/utilization), simulation-store (arrivé entre-temps, conforme au contrat)
+- src/components/results/chart-theme.ts : socle partagé résultats/compare — CHART_HEX (#4F46E5/#16A34A/#D97706/#DC2626/#0284C7), SERIES_PALETTE, GRID_STROKE rgba, styles Tooltip via var(--popover/--border/--foreground), CHARTS_CSS (ticks/axes/légendes Recharts pilotés par var(--muted-foreground) → lisible dark mode), formatTickSeconds
+- src/components/results/kpi-card.tsx : carte KPI compacte (icône, titre, valeur, sous-texte, accent success/warning/destructive/info, badge optionnel)
+- src/components/results/time-charts.tsx : 5 charts Recharts h-240 en grille lg:2-cols — Débit (AreaChart input/served/rejected), Latence (LineChart avg + p95 pointillés), Erreurs (BarChart empilé errors+rejects), Files (LineChart par nodeId, légende = labels), Utilisation (0-1 → % au tooltip, Y 0-100 %) ; tooltips FR, t en secondes, états vides propres
+- src/components/results/load-map.tsx : carte de charge SVG custom (zéro React Flow) — bounding box snapshot → viewBox, zones rect dashed teintées (indigo/cyan/emerald/amber/violet/rose → classes Tailwind), nœuds rects arrondis fill-card + label + badge utilisation max coloré (<60/85/≥85), bordure destructive si errorRate>5 % ou panne simulée+dispo<1, edges bezier gris fléchés (marker, useId), clic nœud ↔ ligne tableau (sélection partagée + edges du nœud mis en avant), légende sous la carte
+- src/components/results/node-metrics-table.tsx : Table scrollable max-h-96, 9 colonnes, tri par clic d'en-tête (toutes colonnes), barre d'utilisation inline colorée, ligne goulot bg-warning/10 + badge « Goulot », icônes nœud via getComponentById+getIcon+CATEGORY_STYLES
+- src/components/results/diagnostics-section.tsx : cartes triées critical>warning>info, bordure gauche colorée, badge sévérité (Critique/Avertissement/Info), evidence en mono, cause, explication, pistes avec Lightbulb/Target/Scale (comment/conditions/compromis) ; carte verte « Aucun problème détecté » si vide
+- src/components/results/results-view.tsx : assemblage — état vide (« Aucun résultat — lancez une simulation depuis l'éditeur » + CTA), en-tête (badges mode/échantillonnage/seed/date + actions Retour éditeur/Relancer/Comparer/Historique), 11 KPI (p95 warning >800 ms, erreurs destructive >2 %, dispo verte ≥99,9 %, budget OK/dépassé, util max + nœud, files max + nœud), sections charts/carte/métriques/diagnostics/hypothèses (accordéon + rappel engineVersion/mode/requêtes simulées/échantillonnage), footer « Simulation locale — aucune donnée réelle n'a été mesurée. » ; « Relancer » → useSimulationStore().run(snapshot, archId≠local?archId:null) exactement selon le contrat
+- src/components/compare/metric-row.tsx : ligne métrique réutilisable (A, B, Δ signé + variation relative, tone better/worse/neutral + TrendingUp/Down/Minus)
+- src/components/compare/compare-view.tsx : sélecteur si compareA/B absent (2 Select alimentés par simulations + aperçu métriques, chargement complet via storage.simulations.get, Actualiser/Retour, état vide) ; sinon écran comparaison — cartes versions A/B (nom/date/seed/mode), Échanger (openCompare(b,a)), tableau 11 métriques avec deltas orientés (latence/erreur/coût : B<A=vert ; débit/dispo : B>A=vert), 2 BarChart (latences, volumétrie), résumé des compromis généré par règles déterministes depuis les deltas (améliorations/dégradations + verdict latence vs coût), Charger A/B via openEditorWithCommand ou toast « Version non sauvegardée » si id local
+- src/components/history/history-view.tsx : en-tête + compteur + filtre Select par architecture + Actualiser, Table scrollable max-h-[70vh] (Date + tooltip timeAgo, Architecture, Mode badge, seed mono, débit, p95 coloré >800 ms, erreurs colorées, dispo, coût), Voir avec loading par ligne (storage.simulations.get → openResult), checkbox max 2 + barre flottante « Comparer la sélection » (chargement des 2 → openCompare), suppression avec AlertDialog, pagination client 20/page, état vide Inbox + CTA éditeur
+- Vérifications : bunx tsc --noEmit → 0 erreur dans results/compare/history (reste 1 erreur dans editor/canvas = périmètre 4-a) ; bunx eslint sur les 3 dossiers → 0 warning
+
+Stage Summary:
+- 10 fichiers livrés : results/{chart-theme,kpi-card,time-charts,load-map,node-metrics-table,diagnostics-section,results-view}.tsx, compare/{metric-row,compare-view}.tsx, history/history-view.tsx
+- Données 100 % issues de SimulationResult/SimulationSummary (overall, nodes, series, diagnostics, hypotheses, snapshot) — zéro valeur fictive ; aucun React Flow dans ces vues
+- Contrats respectés : composants clients sans props, navigation exclusivement via useAppStore, simulation-store consommé selon le contrat (vérifié : implémentation 4-a identique), persistance via storage.simulations
+- Décisions : couleurs charts en hex fixes (palette claire, lisible sur fond sombre) + textes d'axes via variables CSS injectées (CHARTS_CSS) pour le dark mode ; séries files/utilisation limitées aux 5 clés nodeId produites par le moteur ; résumé de comparaison 100 % déterministe (seuils : 3 % ou 0,1 pt)
+- Intégration en attente : montage des vues dans le shell page.tsx (orchestrateur, étape 5)
+
+---
+Task ID: 5
+Agent: orchestrateur (principal)
+Task: Intégration finale, corrections moteur, vérification navigateur E2E
+
+Work Log:
+- AppShell créé (src/components/app-shell.tsx) : header global SystemLab (logo, nav SPA, thème, profil JD/Jean Dupont), bascule des 9 vues, vue éditeur plein écran sans scroll, autres vues scrollables, titre d'onglet dynamique ; page.tsx mono-route assemblée.
+- Agent 4-a (éditeur) et 4-b/4-c ayant livré pendant les délais : vérification de complétude + tsc/lint verts.
+- BUGS MOTEUR CORRIGÉS (diagnostic hors navigateur + mesure) :
+  1. cost.ts : conversion Ko→Go divisait par 1024 au lieu de 1024×1024 (coûts CDN/LB ×1024 : 902 265 $/mois → 1 510 $/mois)
+  2. metrics.ts : onServed ne remplissait pas bucketServed (séries débit « traité » vides sur les graphiques)
+  3. handlers.ts completeRequest : double endVisit + double addProcessed sur les nœuds terminaux à frame (serveur/cache/base/réplica/worker) → Redis « processed = arrivées + hits », PG « processed = 2× arrivées », fuite d'in-flight → refonte : verdict transmis à la frame terminale, comptage unique ; répartition LB redevenue équilibrée (89699/11239/33680 → 46994/44696/42928)
+  4. metrics.ts : utilisation du générateur forcée à 0 + capacité illimitée (l'« Utilisation max 106 % » sur l'Utilisateur n'avait pas de sens physique)
+  5. diagnostics.ts : ids suffixés par nodeId (clés React dupliquées « saturation-elevee »/« spof »)
+- Template api-scalable recalibré pour honorer sa promesse pédagogique : instances 1 par API Server, CDN hitRatio 0.35 → niveau API à ~85 % d'utilisation avec 3 diagnostics « Saturation élevée » (vérifié) ; remède validé E2E (passage à 3 instances → plus aucune saturation).
+- VÉRIFICATION NAVIGATEUR (agent-browser, viewport 1440×900 et 390×844) :
+  ✓ Landing (hero, illustration SVG, fonctionnalités avec compteurs réels 130/11/23, footer sticky)
+  ✓ Modèles : 11 cartes + aperçus SVG ; chargement api-scalable dans l'éditeur
+  ✓ Éditeur : bibliothèque 18 catégories, onglets Tous/Favoris/Récents, recherche ; canvas (zones pointillées teintées, custom nodes avec icônes/sous-titres/badges, connexions fléchées, minimap, contrôles zoom) ; panneau config 3 onglets (édition Instances vérifiée) ; barre simulation complète ; undo/redo ; sauvegarde API → rechargement après reload du navigateur ✓
+  ✓ Simulation : blocage si graphe invalide (« Aucune source de trafic » + toast), progression, bascule auto vers Résultats, Relancer ✓
+  ✓ Résultats : KPIs réels (3 478 req/s, p95 207 ms, dispo 99,9 %, coût 1 510 $ Budget OK, files max 63), 5 graphiques Recharts remplis (vérifiés visuellement), carte de charge interactive, tableau triable, diagnostics avec solutions, hypothèses ✓
+  ✓ Historique : archivage auto (architectureId), sélection 2 → Comparaison ✓
+  ✓ Comparaison : tableau 11 métriques avec Δ orientés colorés, bar charts, résumé des compromis généré depuis les deltas ✓
+  ✓ Apprentissage : 23 cours par niveau, détail, quiz à correction immédiate, exercices liés aux templates ✓
+  ✓ Paramètres + mode sombre (contrastes WCAG) + responsive mobile (pas de débordement, panneaux en Sheet) ✓
+- README.md + docs/engine.md écrits (demande explicite de la spécification)
+- Nettoyage fichiers temporaires ; tsc 0 erreur, ESLint 0 erreur/0 warning, dev server propre
+
+Stage Summary:
+- Application complète et VÉRIFIÉE de bout en bout dans le navigateur
+- 5 bugs de calcul identifiés par mesure et corrigés (coûts, séries, double comptage, répartition, ids)
+- Histoire pédagogique du modèle phare validée : goulot détecté → remède → comparaison A/B
+- Livrables : SPA mono-route 9 vues, moteur hybride reproductible, 130 composants, 11 modèles, 23 cours, API REST + SQLite, README + doc moteur

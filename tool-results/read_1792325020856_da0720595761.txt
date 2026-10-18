@@ -1,0 +1,1311 @@
+     1→# PROJET : SYSTEMLAB
+     2→## Plateforme interactive d'apprentissage et de simulation du System Design
+     3→
+     4→Tu es un ingénieur logiciel senior spécialisé en Next.js, TypeScript,
+     5→architecture logicielle, systèmes distribués, simulation événementielle,
+     6→React Flow et conception d'interfaces techniques avancées.
+     7→
+     8→Ta mission est de développer une véritable application web appelée
+     9→SystemLab, en utilisant l'image jointe comme référence visuelle principale.
+    10→
+    11→ATTENTION :
+    12→L'image jointe est une maquette de référence. Elle définit l'apparence,
+    13→l'organisation générale et l'expérience utilisateur recherchées.
+    14→
+    15→Tu dois reproduire fidèlement son design, tout en construisant une
+    16→application fonctionnelle, interactive, maintenable et extensible.
+    17→
+    18→Ne te contente pas de reproduire l'image avec des composants statiques.
+    19→Les boutons, les panneaux, les connexions, les configurations et les
+    20→simulations doivent fonctionner.
+    21→
+    22→Ne remplace pas les fonctionnalités essentielles par de simples
+    23→animations ou des valeurs fictives.
+    24→
+    25→==================================================
+    26→1. VISION DU PRODUIT
+    27→==================================================
+    28→
+    29→SystemLab est un laboratoire interactif destiné à apprendre le
+    30→System Design en construisant et en testant des architectures logicielles.
+    31→
+    32→L'utilisateur doit pouvoir :
+    33→
+    34→1. Construire une architecture visuellement.
+    35→2. Ajouter des composants informatiques.
+    36→3. Connecter les composants entre eux.
+    37→4. Configurer leurs propriétés.
+    38→5. Définir un scénario de trafic.
+    39→6. Lancer une simulation.
+    40→7. Observer les performances du système.
+    41→8. Identifier les goulots d'étranglement.
+    42→9. Simuler des pannes.
+    43→10. Comprendre les causes des problèmes.
+    44→11. Modifier l'architecture.
+    45→12. Comparer les résultats avant et après modification.
+    46→13. Apprendre les concepts techniques concernés.
+    47→
+    48→L'expérience doit être intuitive pour un débutant tout en permettant
+    49→aux utilisateurs avancés d'explorer des architectures complexes.
+    50→
+    51→Le produit doit ressembler à un outil d'ingénierie professionnel,
+    52→et non à un simple site de cours.
+    53→
+    54→INSPIRATIONS :
+    55→- n8n pour l'édition visuelle et les connexions.
+    56→- React Flow pour le canvas interactif.
+    57→- Linear pour la sobriété de l'interface.
+    58→- Grafana pour les tableaux de bord techniques.
+    59→- Figma pour la manipulation fluide des éléments.
+    60→
+    61→Ne copie pas exactement ces produits.
+    62→Crée une identité propre à SystemLab.
+    63→
+    64→Langue principale : français.
+    65→Les noms techniques reconnus peuvent rester en anglais.
+    66→
+    67→==================================================
+    68→2. STACK TECHNIQUE
+    69→==================================================
+    70→
+    71→Utilise les technologies suivantes :
+    72→
+    73→Frontend :
+    74→- Next.js avec App Router.
+    75→- React.
+    76→- TypeScript en mode strict.
+    77→- Tailwind CSS.
+    78→- shadcn/ui pour les composants d'interface.
+    79→- Lucide React pour les icônes.
+    80→
+    81→Éditeur :
+    82→- @xyflow/react (React Flow).
+    83→- Utiliser les custom nodes et les custom edges.
+    84→- Supporter les interactions natives de React Flow.
+    85→- Ajouter une minimap, un système de zoom et un contrôle de la vue.
+    86→
+    87→Visualisation :
+    88→- Recharts pour les graphiques de résultats.
+    89→- CSS et SVG lorsque cela est plus adapté.
+    90→
+    91→Validation :
+    92→- Zod pour valider les configurations et les entrées.
+    93→
+    94→Gestion des formulaires :
+    95→- React Hook Form si nécessaire.
+    96→
+    97→Gestion de l'état :
+    98→- Zustand pour l'état de l'éditeur et de la simulation.
+    99→- Séparer clairement l'état du canvas, les paramètres et les résultats.
+   100→
+   101→Tests :
+   102→- Vitest pour les tests unitaires.
+   103→- Playwright pour les parcours critiques de l'interface.
+   104→
+   105→Persistance :
+   106→- Prévoir une couche de persistance indépendante de l'interface.
+   107→- Utiliser localStorage pour le mode local et les préférences non sensibles.
+   108→- Concevoir une interface de stockage permettant d'ajouter ultérieurement
+   109→  une base de données et une authentification.
+   110→
+   111→Ne pas imposer une base de données distante si elle n'est pas nécessaire
+   112→pour la première version.
+   113→
+   114→Si Supabase est déjà configuré dans le projet, inspecte l'intégration
+   115→existante et réutilise-la intelligemment.
+   116→
+   117→Ne crée pas une seconde solution d'authentification inutile.
+   118→
+   119→Respecte les versions de dépendances déjà présentes dans le projet.
+   120→N'écrase pas arbitrairement les configurations existantes.
+   121→
+   122→==================================================
+   123→3. ANALYSE DU PROJET AVANT LE DÉVELOPPEMENT
+   124→==================================================
+   125→
+   126→Avant de modifier les fichiers :
+   127→
+   128→1. Inspecte le dépôt.
+   129→2. Identifie la version de Next.js.
+   130→3. Vérifie les dépendances installées.
+   131→4. Vérifie la structure des dossiers.
+   132→5. Identifie les pages déjà présentes.
+   133→6. Vérifie les configurations Tailwind et TypeScript.
+   134→7. Identifie les éventuelles intégrations existantes.
+   135→8. Identifie les tests disponibles.
+   136→
+   137→Si le projet existe déjà, conserve les éléments pertinents.
+   138→
+   139→Ne recrée pas inutilement un projet depuis zéro.
+   140→
+   141→Ensuite, établis un plan d'implémentation et commence le développement.
+   142→
+   143→Ne t'arrête pas à un plan ou à une liste de recommandations :
+   144→implémente réellement les fonctionnalités.
+   145→
+   146→==================================================
+   147→4. DESIGN ET IDENTITÉ VISUELLE
+   148→==================================================
+   149→
+   150→Utilise l'image jointe comme référence visuelle principale.
+   151→
+   152→La maquette montre un éditeur clair avec :
+   153→
+   154→- Une barre supérieure.
+   155→- Une bibliothèque de composants à gauche.
+   156→- Un canvas central.
+   157→- Un panneau de configuration à droite.
+   158→- Une barre de simulation en bas.
+   159→- Une minimap.
+   160→- Des commandes de zoom.
+   161→- Un bouton principal de simulation.
+   162→
+   163→Reproduis cette structure.
+   164→
+   165→Palette de couleurs :
+   166→
+   167→Fond principal : #F7F8FA
+   168→Surfaces : #FFFFFF
+   169→Texte principal : #17202A
+   170→Texte secondaire : #64748B
+   171→Bordures : #E2E8F0
+   172→Couleur principale : #4F46E5
+   173→Succès : #16A34A
+   174→Avertissement : #D97706
+   175→Erreur : #DC2626
+   176→Information : #0284C7
+   177→
+   178→Utilise une typographie lisible et des espacements cohérents.
+   179→
+   180→Les panneaux doivent être compacts sans devenir difficiles à lire.
+   181→
+   182→Le canvas doit occuper la majeure partie de l'écran.
+   183→
+   184→Prévois un mode sombre fonctionnel.
+   185→
+   186→Évite :
+   187→- Les dégradés décoratifs excessifs.
+   188→- Les effets glassmorphism omniprésents.
+   189→- Les grandes cartes inutiles.
+   190→- Les animations excessives.
+   191→- Les interfaces surchargées.
+   192→- Les textes trop petits.
+   193→- Les données fictives présentées comme réelles.
+   194→
+   195→L'application doit être responsive, mais l'expérience desktop est prioritaire.
+   196→
+   197→==================================================
+   198→5. STRUCTURE DE L'APPLICATION
+   199→==================================================
+   200→
+   201→Créer les routes suivantes :
+   202→
+   203→/                       Landing page
+   204→/dashboard              Tableau de bord
+   205→/editor/[id]            Éditeur d'architecture
+   206→/simulations/[id]       Résultats d'une simulation
+   207→/compare                Comparaison d'architectures
+   208→/templates              Bibliothèque de modèles
+   209→/learn                  Parcours d'apprentissage
+   210→/learn/[slug]           Cours détaillé
+   211→/challenges             Exercices pratiques
+   212→/history                Historique des simulations
+   213→/settings               Paramètres utilisateur
+   214→
+   215→La priorité absolue est :
+   216→
+   217→1. L'éditeur.
+   218→2. Le moteur de simulation.
+   219→3. Les résultats.
+   220→4. Le diagnostic.
+   221→5. La sauvegarde.
+   222→6. Les fonctionnalités pédagogiques.
+   223→7. Le dashboard et les pages secondaires.
+   224→
+   225→Ne passe pas trop de temps à perfectionner le marketing avant que
+   226→le cœur technique du produit fonctionne.
+   227→
+   228→==================================================
+   229→6. ÉDITEUR VISUEL
+   230→==================================================
+   231→
+   232→C'est le cœur de SystemLab.
+   233→
+   234→L'utilisateur doit pouvoir construire une architecture sans écrire
+   235→de code.
+   236→
+   237→Utilise React Flow pour gérer le canvas.
+   238→
+   239→Fonctionnalités obligatoires :
+   240→
+   241→- Ajouter un composant par glisser-déposer.
+   242→- Déplacer les composants.
+   243→- Sélectionner un composant.
+   244→- Sélectionner plusieurs composants.
+   245→- Relier les composants.
+   246→- Déplacer les connexions.
+   247→- Supprimer une connexion.
+   248→- Supprimer un composant.
+   249→- Dupliquer un composant.
+   250→- Copier et coller.
+   251→- Annuler une modification.
+   252→- Rétablir une modification.
+   253→- Zoom avant et arrière.
+   254→- Déplacer la vue.
+   255→- Ajuster la vue à l'écran.
+   256→- Afficher une minimap.
+   257→- Sélectionner une zone.
+   258→- Ajouter des notes.
+   259→- Créer des groupes visuels.
+   260→- Renommer l'architecture.
+   261→- Sauvegarder les modifications.
+   262→- Charger une architecture existante.
+   263→
+   264→Prévoir un système de validation des connexions.
+   265→
+   266→Exemple :
+   267→Une connexion entre un client HTTP et un serveur API est valide.
+   268→
+   269→Une connexion incompatible doit afficher un message explicatif
+   270→sans bloquer toute l'application.
+   271→
+   272→Les connexions doivent posséder :
+   273→- Une source.
+   274→- Une destination.
+   275→- Un type.
+   276→- Un protocole éventuel.
+   277→- Des paramètres réseau.
+   278→- Un sens de circulation.
+   279→- Des métriques de simulation.
+   280→
+   281→L'utilisateur doit pouvoir sélectionner une connexion pour modifier
+   282→ses propriétés.
+   283→
+   284→Les groupes visuels doivent permettre de regrouper des composants
+   285→par domaine, région ou couche architecturale.
+   286→
+   287→Ne confonds pas un groupe visuel avec un composant exécutant un
+   288→traitement.
+   289→
+   290→==================================================
+   291→7. BIBLIOTHÈQUE DE COMPOSANTS
+   292→==================================================
+   293→
+   294→Créer une bibliothèque organisée en catégories, avec recherche,
+   295→favoris et composants récemment utilisés.
+   296→
+   297→Catégories :
+   298→
+   299→1. Clients et trafic.
+   300→2. Réseau.
+   301→3. Compute et applications.
+   302→4. Bases SQL.
+   303→5. Bases NoSQL.
+   304→6. Cache.
+   305→7. Messagerie et événements.
+   306→8. Stockage.
+   307→9. Recherche et données.
+   308→10. Communication.
+   309→11. Identité et sécurité.
+   310→12. Résilience.
+   311→13. Observabilité.
+   312→14. Architecture distribuée.
+   313→15. Traitements différés.
+   314→16. Intelligence artificielle.
+   315→17. Services métier.
+   316→18. Infrastructure et cloud.
+   317→
+   318→Composants initiaux à implémenter :
+   319→
+   320→CLIENTS ET TRAFIC :
+   321→- Utilisateur.
+   322→- Navigateur.
+   323→- Application mobile.
+   324→- Client API.
+   325→- Générateur de trafic.
+   326→
+   327→RÉSEAU :
+   328→- DNS.
+   329→- CDN.
+   330→- Load Balancer L4.
+   331→- Load Balancer L7.
+   332→- Reverse Proxy.
+   333→- API Gateway.
+   334→- WAF.
+   335→- Firewall.
+   336→- Rate Limiter.
+   337→
+   338→COMPUTE :
+   339→- Serveur applicatif.
+   340→- API Server.
+   341→- Serveur web.
+   342→- Monolithe.
+   343→- Microservice.
+   344→- Worker.
+   345→- Worker Pool.
+   346→- Fonction serverless.
+   347→- Conteneur.
+   348→- Cluster Kubernetes.
+   349→- Autoscaler.
+   350→
+   351→BASES DE DONNÉES :
+   352→- PostgreSQL.
+   353→- MySQL.
+   354→- MongoDB.
+   355→- Cassandra.
+   356→- DynamoDB.
+   357→- CockroachDB.
+   358→- Base clé-valeur.
+   359→- Base de données distribuée.
+   360→- Read Replica.
+   361→- Connection Pool.
+   362→
+   363→CACHE :
+   364→- Redis.
+   365→- Memcached.
+   366→- Cache local.
+   367→- Cache distribué.
+   368→- CDN Cache.
+   369→
+   370→MESSAGERIE :
+   371→- Kafka.
+   372→- RabbitMQ.
+   373→- NATS.
+   374→- Redis Streams.
+   375→- Message Broker.
+   376→- Queue.
+   377→- Producer.
+   378→- Consumer.
+   379→- Consumer Group.
+   380→- Dead Letter Queue.
+   381→- Event Bus.
+   382→
+   383→STOCKAGE :
+   384→- Stockage objet.
+   385→- Stockage de fichiers.
+   386→- Stockage bloc.
+   387→- Volume persistant.
+   388→- Sauvegarde.
+   389→
+   390→RECHERCHE ET DONNÉES :
+   391→- Elasticsearch.
+   392→- OpenSearch.
+   393→- Data Warehouse.
+   394→- Data Lake.
+   395→- ETL Pipeline.
+   396→- CDC.
+   397→
+   398→COMMUNICATION :
+   399→- REST API.
+   400→- GraphQL.
+   401→- gRPC.
+   402→- WebSocket.
+   403→- Webhook.
+   404→- Server-Sent Events.
+   405→
+   406→SÉCURITÉ :
+   407→- Authentification.
+   408→- OAuth 2.0.
+   409→- OpenID Connect.
+   410→- IAM.
+   411→- Gestion des secrets.
+   412→- Gestion des sessions.
+   413→- Service de chiffrement.
+   414→- Audit Logs.
+   415→
+   416→RÉSILIENCE :
+   417→- Retry.
+   418→- Timeout.
+   419→- Circuit Breaker.
+   420→- Bulkhead.
+   421→- Failover.
+   422→- Health Check.
+   423→- Réplication.
+   424→- Stratégie de reprise.
+   425→
+   426→OBSERVABILITÉ :
+   427→- Logs.
+   428→- Métriques.
+   429→- Traces distribuées.
+   430→- OpenTelemetry.
+   431→- Prometheus.
+   432→- Grafana.
+   433→- Alertes.
+   434→
+   435→ARCHITECTURE DISTRIBUÉE :
+   436→- Sharding.
+   437→- Partitionnement.
+   438→- Réplication multi-région.
+   439→- Leader Election.
+   440→- Consensus.
+   441→- Distributed Lock.
+   442→- Service Discovery.
+   443→- Saga.
+   444→- Event Sourcing.
+   445→- CQRS.
+   446→
+   447→TRAITEMENTS DIFFÉRÉS :
+   448→- Job Queue.
+   449→- Cron Scheduler.
+   450→- Task Scheduler.
+   451→- Batch Processing.
+   452→- Workflow Orchestrator.
+   453→
+   454→IA :
+   455→- LLM.
+   456→- Embedding Model.
+   457→- Vector Database.
+   458→- RAG Pipeline.
+   459→- Inference Server.
+   460→- Model Router.
+   461→- Reranker.
+   462→- AI Agent.
+   463→
+   464→SERVICES MÉTIER :
+   465→- Service utilisateur.
+   466→- Service de paiement.
+   467→- Service de notification.
+   468→- Service e-mail.
+   469→- Service SMS.
+   470→- Service de commande.
+   471→- Service de catalogue.
+   472→
+   473→INFRASTRUCTURE :
+   474→- Région cloud.
+   475→- Zone de disponibilité.
+   476→- VPC.
+   477→- Subnet.
+   478→- Machine virtuelle.
+   479→- Managed Database.
+   480→- Object Storage.
+   481→- Serverless Platform.
+   482→
+   483→Tous ces éléments doivent être disponibles dans la bibliothèque,
+   484→mais ils n'ont pas tous besoin d'un moteur de simulation spécialisé
+   485→dans la première version.
+   486→
+   487→Organise le catalogue pour pouvoir ajouter des composants sans
+   488→modifier profondément le code du canvas.
+   489→
+   490→Chaque composant doit posséder :
+   491→- Un identifiant stable.
+   492→- Un nom.
+   493→- Une catégorie.
+   494→- Une icône.
+   495→- Une description.
+   496→- Des ports d'entrée.
+   497→- Des ports de sortie.
+   498→- Un schéma de configuration.
+   499→- Des valeurs par défaut.
+   500→- Des propriétés simulables.
+   501→- Une documentation pédagogique.
+   502→- Un niveau de maturité du simulateur.
+   503→
+   504→Distingue explicitement :
+   505→- Composant entièrement simulé.
+   506→- Composant partiellement modélisé.
+   507→- Composant uniquement visuel ou pédagogique.
+   508→
+   509→Ne fais jamais croire qu'un composant est réellement simulé si
+   510→son comportement n'est pas implémenté.
+   511→
+   512→==================================================
+   513→8. CONFIGURATION DES COMPOSANTS
+   514→==================================================
+   515→
+   516→Lorsqu'un utilisateur clique sur un composant, afficher un panneau
+   517→latéral adapté à son type.
+   518→
+   519→Le panneau comporte trois onglets :
+   520→
+   521→1. Configuration.
+   522→2. Performance.
+   523→3. Apprentissage.
+   524→
+   525→Configuration :
+   526→- Nom.
+   527→- Type.
+   528→- Paramètres techniques.
+   529→- Capacités.
+   530→- Ressources.
+   531→- Limites.
+   532→- Stratégies utilisées.
+   533→
+   534→Performance :
+   535→- Débit.
+   536→- Latence.
+   537→- Utilisation.
+   538→- Erreurs.
+   539→- Files d'attente.
+   540→- Résultats de simulation.
+   541→
+   542→Apprentissage :
+   543→- Rôle.
+   544→- Fonctionnement.
+   545→- Avantages.
+   546→- Inconvénients.
+   547→- Cas d'utilisation.
+   548→- Erreurs fréquentes.
+   549→- Concepts associés.
+   550→
+   551→Ne présente les métriques de performance qu'après une simulation,
+   552→ou indique clairement qu'il s'agit d'estimations initiales.
+   553→
+   554→Exemple de configuration d'un serveur API :
+   555→
+   556→- Nombre d'instances.
+   557→- Capacité par instance.
+   558→- Temps de traitement moyen.
+   559→- Variabilité du temps de traitement.
+   560→- CPU disponible.
+   561→- Mémoire disponible.
+   562→- Nombre maximal de requêtes concurrentes.
+   563→- Nombre maximal de connexions.
+   564→- Politique de répartition.
+   565→- Taux d'erreur éventuel.
+   566→
+   567→Exemple de configuration PostgreSQL :
+   568→
+   569→- Capacité de traitement.
+   570→- Temps de service moyen.
+   571→- Nombre de connexions maximum.
+   572→- Taille des données.
+   573→- Proportion de lectures.
+   574→- Proportion d'écritures.
+   575→- Index.
+   576→- Cache.
+   577→- Réplication.
+   578→- Nombre de réplicas.
+   579→- Politique de réplication.
+   580→- CPU.
+   581→- Mémoire.
+   582→
+   583→Utilise des formulaires validés et des paramètres adaptés à chaque
+   584→composant.
+   585→
+   586→Les valeurs doivent être modifiables et leur signification expliquée.
+   587→
+   588→==================================================
+   589→9. ARCHITECTURE DU MOTEUR DE SIMULATION
+   590→==================================================
+   591→
+   592→C'est la partie technique la plus importante.
+   593→
+   594→Construis un moteur hybride combinant :
+   595→
+   596→A. Calculs mathématiques.
+   597→B. Simulation événementielle.
+   598→
+   599→Sépare le moteur de simulation du code React.
+   600→
+   601→Le moteur doit pouvoir être testé indépendamment de l'interface.
+   602→
+   603→Ne mets pas la logique de calcul directement dans les composants UI.
+   604→
+   605→Architecture logique suggérée :
+   606→
+   607→src/
+   608→  app/
+   609→  components/
+   610→    editor/
+   611→    nodes/
+   612→    panels/
+   613→    simulation/
+   614→    charts/
+   615→    ui/
+   616→  features/
+   617→    architectures/
+   618→    components-library/
+   619→    simulations/
+   620→    learning/
+   621→  engine/
+   622→    graph/
+   623→    math/
+   624→    events/
+   625→    queueing/
+   626→    failures/
+   627→    metrics/
+   628→    diagnostics/
+   629→  lib/
+   630→    validation/
+   631→    persistence/
+   632→  stores/
+   633→  types/
+   634→  tests/
+   635→
+   636→Adapte cette structure à celle du projet existant.
+   637→
+   638→A. MOTEUR MATHÉMATIQUE
+   639→
+   640→Utiliser des calculs déterministes pour estimer :
+   641→- Capacités.
+   642→- Débits.
+   643→- Utilisation des ressources.
+   644→- Latences.
+   645→- Files d'attente simplifiées.
+   646→- Limites de concurrence.
+   647→- Coûts estimés.
+   648→- Propagation des goulots d'étranglement.
+   649→
+   650→B. MOTEUR ÉVÉNEMENTIEL
+   651→
+   652→Simuler :
+   653→- Arrivée des requêtes.
+   654→- Déplacement des requêtes dans le graphe.
+   655→- Traitement par les composants.
+   656→- Files d'attente.
+   657→- Délais de traitement.
+   658→- Délais réseau.
+   659→- Concurrence.
+   660→- Saturation.
+   661→- Erreurs.
+   662→- Timeouts.
+   663→- Pannes.
+   664→- Reprise des services.
+   665→- Retry.
+   666→- Circuit Breaker.
+   667→- Événements asynchrones.
+   668→
+   669→Utilise une horloge virtuelle et une file d'événements ordonnée
+   670→par temps de simulation.
+   671→
+   672→Ne simule pas chaque requête individuelle lorsque le volume rend
+   673→cette approche trop coûteuse.
+   674→
+   675→Prévois plusieurs niveaux de précision :
+   676→
+   677→1. Estimation analytique rapide.
+   678→2. Simulation événementielle avec échantillonnage.
+   679→3. Simulation détaillée pour les scénarios compatibles.
+   680→
+   681→Les résultats doivent préciser le mode utilisé.
+   682→
+   683→C. PROPAGATION DES REQUÊTES
+   684→
+   685→Une requête doit pouvoir traverser plusieurs composants.
+   686→
+   687→Exemple :
+   688→
+   689→Clients
+   690→  -> Load Balancer
+   691→  -> API Servers
+   692→  -> Redis
+   693→  -> PostgreSQL
+   694→
+   695→Le moteur doit :
+   696→- Respecter les connexions du graphe.
+   697→- Calculer les délais de traitement.
+   698→- Tenir compte des capacités.
+   699→- Simuler les files d'attente.
+   700→- Propager les erreurs.
+   701→- Calculer les métriques de bout en bout.
+   702→
+   703→Le moteur doit détecter les cycles dans le graphe.
+   704→
+   705→Les cycles ne doivent pas provoquer de boucle infinie.
+   706→
+   707→Une architecture invalide doit recevoir un diagnostic compréhensible.
+   708→
+   709→D. FILES D'ATTENTE
+   710→
+   711→Modéliser au minimum :
+   712→- Capacité de service.
+   713→- Nombre de workers.
+   714→- Temps de service.
+   715→- Nombre de requêtes en attente.
+   716→- Saturation.
+   717→- Temps d'attente.
+   718→- Rejets lorsque les limites sont atteintes.
+   719→
+   720→Évite les formules simplistes lorsque leurs hypothèses ne sont
+   721→pas satisfaites.
+   722→
+   723→Par exemple, une approximation de file d'attente ne doit pas être
+   724→présentée comme fiable lorsque le système est instable.
+   725→
+   726→E. LATENCE
+   727→
+   728→Distinguer :
+   729→- Latence réseau.
+   730→- Temps de traitement.
+   731→- Temps d'attente.
+   732→- Latence totale.
+   733→- Moyenne.
+   734→- p50.
+   735→- p95.
+   736→- p99.
+   737→
+   738→Les percentiles doivent être calculés à partir de données simulées
+   739→appropriées ou d'une approximation explicitement documentée.
+   740→
+   741→Ne calcule pas le p95 en multipliant arbitrairement la moyenne.
+   742→
+   743→F. CAPACITÉ ET SATURATION
+   744→
+   745→Calculer les limites en fonction des paramètres du composant.
+   746→
+   747→Une saturation doit avoir des conséquences cohérentes :
+   748→- Augmentation de la file d'attente.
+   749→- Augmentation de la latence.
+   750→- Rejets.
+   751→- Timeouts.
+   752→- Propagation de la surcharge.
+   753→
+   754→G. RÉPPLICATION ET CACHE
+   755→
+   756→Implémenter progressivement les modèles de :
+   757→- Cache hit et cache miss.
+   758→- Politiques de cache.
+   759→- Réplication en lecture.
+   760→- Réplication en écriture.
+   761→- Latence de réplication.
+   762→- Capacité des réplicas.
+   763→
+   764→Documenter les hypothèses de chaque modèle.
+   765→
+   766→H. PANNES
+   767→
+   768→Permettre de configurer :
+   769→- Début de la panne.
+   770→- Durée.
+   771→- Composant concerné.
+   772→- Indisponibilité complète ou dégradation.
+   773→- Temps de récupération.
+   774→
+   775→Observer les conséquences sur les composants dépendants.
+   776→
+   777→I. REPRODUCTIBILITÉ
+   778→
+   779→Permettre de configurer une seed aléatoire.
+   780→
+   781→À paramètres et seed identiques, les résultats doivent être
+   782→reproductibles autant que possible.
+   783→
+   784→J. MÉTRIQUES
+   785→
+   786→Produire :
+   787→- Débit entrant.
+   788→- Débit traité.
+   789→- Latence.
+   790→- Erreurs.
+   791→- Rejets.
+   792→- CPU estimé.
+   793→- Mémoire estimée.
+   794→- Longueur des files.
+   795→- Temps d'attente.
+   796→- Disponibilité simulée.
+   797→- Coût estimé.
+   798→
+   799→Chaque métrique doit avoir une définition claire.
+   800→
+   801→Ne mélange pas les unités.
+   802→
+   803→==================================================
+   804→10. SCÉNARIOS DE TRAFIC
+   805→==================================================
+   806→
+   807→Créer une interface de configuration du trafic.
+   808→
+   809→Paramètres :
+   810→
+   811→- Utilisateurs actifs.
+   812→- Requêtes par seconde.
+   813→- Durée de simulation.
+   814→- Taille des requêtes.
+   815→- Proportion lecture/écriture.
+   816→- Latence réseau.
+   817→- Taux d'erreur initial.
+   818→- Profil de trafic.
+   819→- Seed aléatoire.
+   820→- Budget cible.
+   821→
+   822→Profils :
+   823→- Constant.
+   824→- Progressif.
+   825→- Pic soudain.
+   826→- En vagues.
+   827→- Aléatoire.
+   828→- Personnalisé.
+   829→
+   830→Modes :
+   831→- Test rapide.
+   832→- Test de charge.
+   833→- Test de stress.
+   834→- Test d'endurance.
+   835→- Test de panne.
+   836→
+   837→Les utilisateurs actifs et les requêtes par seconde ne sont pas
+   838→la même chose.
+   839→
+   840→L'interface doit expliquer cette différence.
+   841→
+   842→La simulation doit pouvoir fonctionner sans backend distant dans
+   843→la première version.
+   844→
+   845→Pour les calculs coûteux, envisager un Web Worker afin de ne pas
+   846→bloquer l'interface.
+   847→
+   848→Afficher une progression et permettre d'interrompre le calcul.
+   849→
+   850→==================================================
+   851→11. DIAGNOSTICS INTELLIGENTS
+   852→==================================================
+   853→
+   854→Créer un moteur de diagnostic basé sur des règles explicites
+   855→et sur les métriques produites par le simulateur.
+   856→
+   857→Ne rends pas l'utilisation d'une API d'IA obligatoire pour
+   858→obtenir des diagnostics corrects.
+   859→
+   860→Exemples de règles :
+   861→
+   862→- Saturation d'un composant.
+   863→- File d'attente qui augmente.
+   864→- Dépendance critique sans redondance.
+   865→- Base de données trop sollicitée.
+   866→- Cache peu efficace.
+   867→- Trop de connexions concurrentes.
+   868→- Risque de cascade de timeouts.
+   869→- Composant isolé.
+   870→- Connexion invalide.
+   871→- Architecture impossible à simuler correctement.
+   872→
+   873→Chaque diagnostic contient :
+   874→
+   875→- Gravité.
+   876→- Composant concerné.
+   877→- Métriques justificatives.
+   878→- Cause probable.
+   879→- Explication pédagogique.
+   880→- Solutions possibles.
+   881→- Compromis.
+   882→- Limites de la recommandation.
+   883→
+   884→Exemple :
+   885→
+   886→"PostgreSQL devient le principal goulot d'étranglement."
+   887→
+   888→Afficher les métriques qui justifient cette conclusion.
+   889→
+   890→Puis proposer plusieurs pistes :
+   891→- Optimiser les requêtes.
+   892→- Ajouter un cache.
+   893→- Augmenter la capacité.
+   894→- Introduire des réplicas de lecture.
+   895→
+   896→Préciser les conditions dans lesquelles chaque solution est utile.
+   897→
+   898→Ne recommande pas automatiquement un réplica de lecture pour
+   899→résoudre une surcharge principalement liée aux écritures.
+   900→
+   901→==================================================
+   902→12. RÉSULTATS DE SIMULATION
+   903→==================================================
+   904→
+   905→Créer une page de résultats comprenant :
+   906→
+   907→- Débit.
+   908→- Latence moyenne.
+   909→- p50.
+   910→- p95.
+   911→- p99.
+   912→- Taux d'erreur.
+   913→- Requêtes rejetées.
+   914→- Utilisation maximale.
+   915→- Files d'attente.
+   916→- Disponibilité simulée.
+   917→- Coût estimé.
+   918→
+   919→Créer des graphiques temporels.
+   920→
+   921→Afficher une vue de l'architecture avec les résultats superposés.
+   922→
+   923→Mettre en évidence :
+   924→- Les composants saturés.
+   925→- Les connexions dégradées.
+   926→- Les files d'attente importantes.
+   927→- Les erreurs.
+   928→- Les pannes.
+   929→
+   930→Ajouter une section de diagnostic.
+   931→
+   932→Afficher les hypothèses utilisées.
+   933→
+   934→Ajouter un bouton pour revenir à l'éditeur.
+   935→
+   936→Ajouter un bouton pour relancer la simulation.
+   937→
+   938→Les données doivent provenir du moteur de simulation.
+   939→
+   940→Ne remplis pas les graphiques avec des nombres aléatoires uniquement
+   941→pour donner l'impression que le système fonctionne.
+   942→
+   943→Les données de démonstration doivent être séparées des résultats
+   944→calculés et clairement identifiées.
+   945→
+   946→==================================================
+   947→13. COMPARAISON D'ARCHITECTURES
+   948→==================================================
+   949→
+   950→Permettre de comparer deux versions d'une architecture.
+   951→
+   952→Exemple :
+   953→
+   954→Version A :
+   955→Load Balancer -> API Servers -> PostgreSQL.
+   956→
+   957→Version B :
+   958→Load Balancer -> API Servers -> Redis -> PostgreSQL.
+   959→
+   960→Exécuter les simulations avec des paramètres comparables.
+   961→
+   962→Comparer :
+   963→- Throughput.
+   964→- Latence.
+   965→- Taux d'erreur.
+   966→- Utilisation.
+   967→- Files d'attente.
+   968→- Coût.
+   969→- Disponibilité simulée.
+   970→
+   971→Afficher les différences et les compromis.
+   972→
+   973→L'utilisateur doit pouvoir modifier une architecture et conserver
+   974→une version précédente pour comparaison.
+   975→
+   976→==================================================
+   977→14. SAUVEGARDE ET PERSISTANCE
+   978→==================================================
+   979→
+   980→Implémenter :
+   981→- Création d'architecture.
+   982→- Renommage.
+   983→- Sauvegarde.
+   984→- Chargement.
+   985→- Duplication.
+   986→- Suppression.
+   987→- Historique des simulations.
+   988→- Restauration de versions si possible.
+   989→
+   990→Utiliser un modèle de données versionné.
+   991→
+   992→Une architecture sauvegardée doit conserver :
+   993→- Les nœuds.
+   994→- Leurs configurations.
+   995→- Les connexions.
+   996→- Les paramètres du scénario.
+   997→- Les métadonnées.
+   998→
+   999→Une simulation doit conserver :
+  1000→- La version de l'architecture.
+  1001→- Les paramètres du scénario.
+  1002→- La seed.
+  1003→- La version du moteur.
+  1004→- Les métriques.
+  1005→- Les diagnostics.
+  1006→- Les hypothèses.
+  1007→
+  1008→Ne sauvegarde pas uniquement le résultat affiché à l'écran.
+  1009→
+  1010→Prévois une interface de stockage indépendante pour pouvoir passer
+  1011→ultérieurement du stockage local à une base de données.
+  1012→
+  1013→==================================================
+  1014→15. MODÈLES PRÉCONFIGURÉS
+  1015→==================================================
+  1016→
+  1017→Créer des modèles d'architecture :
+  1018→
+  1019→- API simple.
+  1020→- Architecture à trois niveaux.
+  1021→- API scalable.
+  1022→- Application de messagerie.
+  1023→- Marketplace.
+  1024→- Système de paiement.
+  1025→- Plateforme de notifications.
+  1026→- Plateforme vidéo.
+  1027→- Architecture événementielle.
+  1028→- Architecture multirégion.
+  1029→- Application IA avec RAG.
+  1030→
+  1031→L'utilisateur peut :
+  1032→- Explorer le modèle.
+  1033→- Le charger dans le canvas.
+  1034→- Le modifier.
+  1035→- Le sauvegarder sous un nouveau nom.
+  1036→
+  1037→Les modèles doivent être de véritables graphes valides,
+  1038→et pas seulement des images statiques.
+  1039→
+  1040→==================================================
+  1041→16. APPRENTISSAGE
+  1042→==================================================
+  1043→
+  1044→Créer un parcours pédagogique progressif.
+  1045→
+  1046→Débutant :
+  1047→- Client-serveur.
+  1048→- HTTP.
+  1049→- API.
+  1050→- Bases de données.
+  1051→- Cache.
+  1052→- Load Balancing.
+  1053→- Latence et débit.
+  1054→
+  1055→Intermédiaire :
+  1056→- Scaling horizontal.
+  1057→- Réplication.
+  1058→- Sharding.
+  1059→- Message Queues.
+  1060→- Asynchronisme.
+  1061→- Rate Limiting.
+  1062→- Résilience.
+  1063→- Observabilité.
+  1064→
+  1065→Avancé :
+  1066→- Cohérence distribuée.
+  1067→- Consensus.
+  1068→- CAP Theorem.
+  1069→- CQRS.
+  1070→- Event Sourcing.
+  1071→- Saga.
+  1072→- Multi-région.
+  1073→- Gestion des pannes.
+  1074→
+  1075→Chaque module doit proposer :
+  1076→- Explication.
+  1077→- Schéma.
+  1078→- Exemple.
+  1079→- Exercice.
+  1080→- Simulation.
+  1081→- Quiz.
+  1082→- Résumé.
+  1083→
+  1084→Les exercices doivent être reliés au moteur de simulation.
+  1085→
+  1086→Exemple :
+  1087→Un exercice demande de réduire la latence p95 tout en respectant
+  1088→un budget donné.
+  1089→
+  1090→La plateforme évalue les résultats à partir des métriques simulées.
+  1091→
+  1092→Il peut exister plusieurs solutions acceptables.
+  1093→
+  1094→==================================================
+  1095→17. SÉCURITÉ ET QUALITÉ
+  1096→==================================================
+  1097→
+  1098→Même si la première version est locale, adopte de bonnes pratiques.
+  1099→
+  1100→- Valider les configurations avec Zod.
+  1101→- Éviter l'exécution de code utilisateur arbitraire.
+  1102→- Ne pas exécuter de commandes système issues des composants.
+  1103→- Limiter le nombre de nœuds simulables.
+  1104→- Limiter la durée maximale d'une simulation.
+  1105→- Éviter les boucles infinies.
+  1106→- Prévenir les calculs excessifs.
+  1107→- Gérer les erreurs proprement.
+  1108→- Ne jamais exposer de secrets côté client.
+  1109→- Ne pas faire confiance aux paramètres venant du navigateur.
+  1110→- Nettoyer les ressources des Web Workers.
+  1111→- Prévoir des limites de mémoire et de temps.
+  1112→
+  1113→Les tests de sécurité de la plateforme doivent être simulés dans
+  1114→le moteur pédagogique.
+  1115→
+  1116→Ne prétends pas effectuer de véritables audits de sécurité de systèmes
+  1117→externes.
+  1118→
+  1119→Ne génère pas de trafic d'attaque vers des services tiers.
+  1120→
+  1121→==================================================
+  1122→18. PERFORMANCE ET ROBUSTESSE
+  1123→==================================================
+  1124→
+  1125→L'éditeur doit rester fluide même avec plusieurs dizaines de nœuds.
+  1126→
+  1127→- Éviter les re-renders inutiles.
+  1128→- Utiliser des sélecteurs Zustand adaptés.
+  1129→- Séparer le moteur de simulation de React.
+  1130→- Éviter de recalculer toutes les métriques à chaque frappe.
+  1131→- Utiliser un Web Worker pour les simulations suffisamment coûteuses.
+  1132→- Permettre d'arrêter une simulation.
+  1133→- Afficher les erreurs et les états de chargement.
+  1134→- Utiliser des types TypeScript stricts.
+  1135→- Éviter les dépendances inutiles.
+  1136→- Ne pas utiliser de gros composants monolithiques.
+  1137→
+  1138→Ne crée pas un fichier unique contenant toute l'application.
+  1139→
+  1140→Organise le code en modules cohérents.
+  1141→
+  1142→==================================================
+  1143→19. TESTS OBLIGATOIRES
+  1144→==================================================
+  1145→
+  1146→Écrire des tests unitaires pour :
+  1147→
+  1148→- Création de nœuds.
+  1149→- Connexions.
+  1150→- Validation des graphes.
+  1151→- Paramètres invalides.
+  1152→- Calcul de capacité.
+  1153→- Calcul de latence.
+  1154→- Saturation.
+  1155→- Files d'attente.
+  1156→- Propagation des erreurs.
+  1157→- Pannes.
+  1158→- Reprise.
+  1159→- Cache.
+  1160→- Réplication.
+  1161→- Reproductibilité.
+  1162→- Diagnostics.
+  1163→
+  1164→Écrire des tests d'intégration pour :
+  1165→- Sauvegarder une architecture.
+  1166→- Recharger une architecture.
+  1167→- Modifier les paramètres.
+  1168→- Lancer une simulation.
+  1169→- Afficher les résultats.
+  1170→
+  1171→Écrire des tests Playwright pour le parcours principal :
+  1172→
+  1173→1. Ouvrir l'éditeur.
+  1174→2. Ajouter un Load Balancer.
+  1175→3. Ajouter trois API Servers.
+  1176→4. Ajouter Redis.
+  1177→5. Ajouter PostgreSQL.
+  1178→6. Connecter les composants.
+  1179→7. Configurer le scénario.
+  1180→8. Lancer la simulation.
+  1181→9. Consulter les résultats.
+  1182→10. Identifier un goulot d'étranglement.
+  1183→11. Modifier l'architecture.
+  1184→12. Relancer la simulation.
+  1185→
+  1186→Le parcours doit fonctionner réellement.
+  1187→
+  1188→==================================================
+  1189→20. CRITÈRES D'ACCEPTATION
+  1190→==================================================
+  1191→
+  1192→Le travail ne peut pas être considéré comme terminé si l'application
+  1193→est uniquement visuellement convaincante.
+  1194→
+  1195→La première version fonctionnelle doit permettre de :
+  1196→
+  1197→1. Construire une architecture visuelle.
+  1198→2. Ajouter et connecter les composants.
+  1199→3. Modifier leurs propriétés.
+  1200→4. Sauvegarder et recharger une architecture.
+  1201→5. Configurer un scénario de trafic.
+  1202→6. Lancer une simulation réelle dans le moteur interne.
+  1203→7. Produire des métriques cohérentes.
+  1204→8. Détecter des goulots d'étranglement.
+  1205→9. Simuler au moins un scénario de panne.
+  1206→10. Afficher des diagnostics justifiés.
+  1207→11. Modifier l'architecture.
+  1208→12. Comparer les résultats avant et après modification.
+  1209→13. Consulter les explications pédagogiques.
+  1210→14. Exécuter les tests principaux sans erreur.
+  1211→
+  1212→Pour la V1, implémente complètement les modèles des composants
+  1213→les plus importants avant d'étendre la bibliothèque.
+  1214→
+  1215→Priorité de simulation :
+  1216→- Générateur de trafic.
+  1217→- Load Balancer.
+  1218→- API Server.
+  1219→- Cache.
+  1220→- PostgreSQL.
+  1221→- Message Queue.
+  1222→- Worker.
+  1223→- Réplica de lecture.
+  1224→- Rate Limiter.
+  1225→- Circuit Breaker.
+  1226→
+  1227→Les autres composants doivent pouvoir être ajoutés progressivement.
+  1228→
+  1229→Pour chaque composant non encore simulé, afficher explicitement
+  1230→son niveau de prise en charge.
+  1231→
+  1232→==================================================
+  1233→21. MÉTHODE DE TRAVAIL
+  1234→==================================================
+  1235→
+  1236→Travaille par étapes.
+  1237→
+  1238→ÉTAPE 1 :
+  1239→Inspecter le dépôt et identifier les contraintes techniques.
+  1240→
+  1241→ÉTAPE 2 :
+  1242→Mettre en place le design system et la structure des pages.
+  1243→
+  1244→ÉTAPE 3 :
+  1245→Créer l'éditeur React Flow avec les panneaux.
+  1246→
+  1247→ÉTAPE 4 :
+  1248→Créer la bibliothèque de composants extensible.
+  1249→
+  1250→ÉTAPE 5 :
+  1251→Créer les modèles de données et la persistance.
+  1252→
+  1253→ÉTAPE 6 :
+  1254→Implémenter le moteur de simulation indépendant de l'interface.
+  1255→
+  1256→ÉTAPE 7 :
+  1257→Créer les graphiques et les résultats.
+  1258→
+  1259→ÉTAPE 8 :
+  1260→Créer le moteur de diagnostic.
+  1261→
+  1262→ÉTAPE 9 :
+  1263→Créer les modèles et les exercices.
+  1264→
+  1265→ÉTAPE 10 :
+  1266→Écrire les tests et corriger les problèmes.
+  1267→
+  1268→ÉTAPE 11 :
+  1269→Vérifier l'application en conditions réelles d'utilisation locale.
+  1270→
+  1271→Après chaque étape :
+  1272→- Vérifier le code.
+  1273→- Exécuter les tests concernés.
+  1274→- Corriger les erreurs.
+  1275→- Vérifier que les fonctionnalités précédentes continuent de marcher.
+  1276→
+  1277→Ne prétends pas qu'un test a réussi s'il n'a pas été exécuté.
+  1278→
+  1279→Ne supprime pas une fonctionnalité existante sans justification.
+  1280→
+  1281→Ne remplace pas les fonctionnalités demandées par des placeholders.
+  1282→
+  1283→Si une fonctionnalité est trop complexe pour être terminée immédiatement,
+  1284→implémente une version minimale réellement fonctionnelle, documente
+  1285→ses limites et garde une architecture permettant de l'améliorer.
+  1286→
+  1287→==================================================
+  1288→22. LIVRABLE FINAL
+  1289→==================================================
+  1290→
+  1291→À la fin, fournir :
+  1292→
+  1293→- Une application Next.js fonctionnelle.
+  1294→- Une interface fidèle à la maquette.
+  1295→- Un éditeur visuel opérationnel.
+  1296→- Une bibliothèque de composants.
+  1297→- Un moteur de simulation hybride.
+  1298→- Des résultats calculés.
+  1299→- Des diagnostics explicables.
+  1300→- Des modèles d'architectures.
+  1301→- Une première expérience pédagogique.
+  1302→- Des tests automatisés.
+  1303→- Un README avec les instructions d'installation et d'exécution.
+  1304→- Une documentation expliquant le moteur de simulation.
+  1305→- Une liste honnête des fonctionnalités terminées et des limites.
+  1306→
+  1307→Commence maintenant par inspecter le dépôt, puis implémente le produit.
+  1308→
+  1309→Ne t'arrête pas à la conception théorique.
+  1310→Ne livre pas seulement une maquette.
+  1311→Construis une première version réellement utilisable de SystemLab.

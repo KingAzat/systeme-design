@@ -1,0 +1,46 @@
+// SystemLab — schéma de persistance
+// Architectures (graphes versionnés) + historique des simulations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Une architecture sauvegardée : nœuds, connexions, zones et scénario.
+model Architecture {
+  id          String            @id @default(cuid())
+  name        String
+  description String?
+  /// JSON sérialisé : { nodes: ArchNode[], edges: ArchEdge[], zones: ArchZone[], scenario: ScenarioConfig }
+  data        String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  simulations SimulationRecord[]
+
+  @@index([updatedAt])
+}
+
+/// Résultat d'une simulation exécutée (pour l'historique et la comparaison).
+model SimulationRecord {
+  id             String       @id @default(cuid())
+  label          String?
+  architectureId String
+  architecture   Architecture @relation(fields: [architectureId], references: [id], onDelete: Cascade)
+  /// Version du moteur de simulation utilisée
+  engineVersion  String
+  /// 'analytical' | 'event-sampled'
+  mode           String
+  seed           Int
+  /// JSON sérialisé : ScenarioConfig
+  scenario       String
+  /// JSON sérialisé : SimulationResult complet (métriques, séries, diagnostics, hypothèses)
+  result         String
+  createdAt      DateTime     @default(now())
+
+  @@index([architectureId])
+  @@index([createdAt])
+}
