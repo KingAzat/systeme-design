@@ -296,3 +296,20 @@ Stage Summary:
 - 4 bugs moteur corrigés au passage : double comptage proxy terminal, métriques Circuit Breaker (débit nul + fuite inFlight), effet de bord worker bloqué derrière un proxy (garde depth 2→3), estimation rapide coupée par les composants visuels (+ répartition lecture/écriture fidèle au moteur).
 - 6 modèles existants réparés (branches asynchrones mortes chez messagerie/marketplace/notifications/vidéo/RAG ; multi-région zones sur le chemin) ; badge « Goulot » désormais attribué aux workers saturés (arrivées comptées au dispatch).
 - État final : E2E vérifié navigateur (landing, galerie, éditeur, simulations YouTube/WhatsApp avec diagnostics pédagogiques), responsive 390/1440 px, thème sombre corrigé (contraste des aperçus), lint/tsc/dev.log propres.
+
+---
+Task ID: 8
+Agent: orchestrateur (principal)
+Task: Audit complet du projet demandé par l'utilisateur (« scane le code le design etc et dit moi tout ce qui pourrait etre ameliorer »)
+
+Work Log:
+- 3 agents d'audit parallèles (Explore, lecture seule) : moteur src/engine (avec benchmark éphémère exécuté puis supprimé : 100k req ≈ 300-500 ms, déterminisme vérifié), UI/UX (~40 fichiers composants/stores/globals.css), backend (routes API, Prisma, validation, stores client).
+- Vérification personnelle des 2 constats les plus critiques : bug T1 (GET /api/architectures/[id]:24-31 — le spread du JSON écrase name/description des colonnes → renommage dashboard annulé à la réouverture) et C13 (editor-view.tsx:64-90 — reset/loadTemplate/loadArchitecture écrasent le travail en cours sans confirmation, pas de beforeunload).
+- Passe visuelle (agent-browser + VLM) du landing en light 1440px : verdict design B+ (hiérarchie claire, palette cohérente, mais polish micro-detail insuffisant).
+- Rapport d'audit complet livré à l'utilisateur (constats + priorisation).
+
+Stage Summary:
+- Aucun code modifié (audit uniquement). Principales découvertes :
+  🔴 4 bugs critiques : (1) écrasement name/description colonnes par JSON stale dans GET /api/architectures/[id] (renommage annulé) ; (2) perte de travail éditeur sans confirmation (reset/loadTemplate + absence de beforeunload) ; (3) échec d'autosave silencieux non signalé (editor-toolbar.tsx:96-103) ; (4) budget MAX_EVENTS sans plafond global de fan-out → gel navigateur possible sur graphe à fan-out profond (simulate.ts:330).
+  🟠 majeurs : JSON.stringify du graphe entier à chaque frame de drag (config-panel.tsx:386) ; listes API rechargent/parsent les payloads JSON complets à chaque mutation (D2/R6/C1) ; seuils de saturation incohérents 80/95 vs 60/85 selon les vues ; scroll non réinitialisé au changement de vue ; refresh sans catch (rejets non gérés) ; TanStack Query installé jamais branché ; zéro test automatisé sur 5 230 lignes de moteur ; ignoreBuildErrors:true neutralise tsc.
+- Rapport complet dans la réponse utilisateur ; top 10 priorisé proposé.

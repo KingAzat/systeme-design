@@ -1,0 +1,882 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * SystemLab — Store de l'éditeur (document d'architecture + undo/redo).
+     5→ *
+     6→ * Le document vit ici en dehors des composants : le shell démonte/remonte les
+     7→ * vues, l'état de l'éditeur survit donc aux allers-retours résultats ↔ éditeur.
+     8→ *
+     9→ * Undo/redo : piles `past`/`future` de snapshots sérialisés (JSON) du document
+    10→ * {name, description, nodes, edges, zones, scenario}, capacité 50.
+    11→ * - Chaque action mutante pousse un snapshot AVANT modification.
+    12→ * - Exceptions « continues » (moveNode pendant un drag, updateNodeConfig,
+    13→ *   setScenario, updateEdge, updateZone, renameNode) : un mécanisme de
+    14→ *   coalescence (tag + fenêtre temporelle) évite d'inonder l'historique —
+    15→ *   un seul snapshot est poussé au début d'une rafale de modifications,
+    16→ *   comme beginHistorySnapshot() le fait pour le drag.
+    17→ * - moveNode ne pousse jamais : le canvas appelle beginHistorySnapshot() au
+    18→ *   onNodeDragStart et endDrag() au onNodeDragStop.
+    19→ */
+    20→import { create } from "zustand";
+    21→import type {
+    22→  ArchEdge,
+    23→  ArchNode,
+    24→  ArchZone,
+    25→  Architecture,
+    26→  ArchitectureData,
+    27→  Protocol,
+    28→  ScenarioConfig,
+    29→  ZoneColor,
+    30→} from "@/types";
+    31→import { shortId } from "@/lib/format";
+    32→import {
+    33→  getComponentById,
+    34→  getDefaultConfig,
+    35→  validateConnection,
+    36→  type ConnectionValidation,
+    37→} from "@/data/catalog/registry";
+    38→import { DEFAULT_SCENARIO } from "@/data/templates";
+    39→
+    40→/* ------------------------------------------------------------------ */
+    41→/* Types publics                                                       */
+    42→/* ------------------------------------------------------------------ */
+    43→
+    44→/** Onglet actif du panneau de configuration (nœud sélectionné). */
+    45→export type EditorConfigTab = "configuration" | "performance" | "learning";
+    46→
+    47→export interface ActionResult {
+    48→  ok: boolean;
+    49→  reason?: string;
+    50→}
+    51→
+    52→/** Snapshot sérialisé du document (base de l'historique). */
+    53→interface DocSnapshot {
+    54→  name: string;
+    55→  description: string;
+    56→  nodes: ArchNode[];
+    57→  edges: ArchEdge[];
+    58→  zones: ArchZone[];
+    59→  scenario: ScenarioConfig;
+    60→}
+    61→
+    62→interface AddNodeOptions {
+    63→  /** Sélectionne le nœud créé et ouvre le panneau de configuration. */
+    64→  select?: boolean;
+    65→}
+    66→
+    67→export interface EditorState {
+    68→  /* --- document --- */
+    69→  name: string;
+    70→  description: string;
+    71→  /** null = document non sauvegardé (jamais persisté côté serveur). */
+    72→  architectureId: string | null;
+    73→  nodes: ArchNode[];
+    74→  edges: ArchEdge[];
+    75→  zones: ArchZone[];
+    76→  scenario: ScenarioConfig;
+    77→  dirty: boolean;
+    78→  savedAt: string | null;
+    79→
+    80→  /* --- sélection (une seule entité « principale » à la fois) --- */
+    81→  /** Multi-sélection canvas (nœuds système uniquement). */
+    82→  selectedNodeIds: string[];
+    83→  selectedNodeId: string | null;
+    84→  selectedEdgeId: string | null;
+    85→  selectedZoneId: string | null;
+    86→
+    87→  /* --- presse-papiers --- */
+    88→  copiedNodes: ArchNode[];
+    89→  copiedEdges: ArchEdge[];
+    90→
+    91→  /* --- historique --- */
+    92→  past: DocSnapshot[];
+    93→  future: DocSnapshot[];
+    94→
+    95→  /* --- état UI (non persisté) --- */
+    96→  libraryOpen: boolean;
+    97→  configOpen: boolean;
+    98→  configTab: EditorConfigTab;
+    99→  simulationBarOpen: boolean;
+   100→  /** Bandeau pédagogique (objectif d'exercice) au-dessus du canvas. */
+   101→  exerciseHint: string | null;
+   102→  /** Incrémenté à chaque chargement/reset → déclenche fitView côté canvas. */
+   103→  docEpoch: number;
+   104→  /** Incrémenté à chaque mutation → déclenche la sauvegarde automatique. */
+   105→  revision: number;
+   106→
+   107→  /* --- actions document --- */
+   108→  addNode: (
+   109→    componentId: string,
+   110→    position: { x: number; y: number },
+   111→    options?: AddNodeOptions,
+   112→  ) => ArchNode | null;
+   113→  updateNodeConfig: (nodeId: string, key: string, value: number | string | boolean) => void;
+   114→  resetNodeConfig: (nodeId: string) => void;
+   115→  renameNode: (nodeId: string, label: string) => void;
+   116→  moveNode: (nodeId: string, position: { x: number; y: number }) => void;
+   117→  addEdge: (source: string, target: string) => ActionResult;
+   118→  /** Validation pure (sans mutation) pour isValidConnection du canvas. */
+   119→  checkConnection: (source: string, target: string) => ConnectionValidation;
+   120→  updateEdge: (
+   121→    edgeId: string,
+   122→    patch: Partial<Pick<ArchEdge, "protocol" | "networkLatencyMs" | "bandwidthMbps" | "label">>,
+   123→  ) => void;
+   124→  deleteEdge: (edgeId: string) => void;
+   125→  addZone: (
+   126→    label?: string,
+   127→    color?: ZoneColor,
+   128→    position?: { x: number; y: number },
+   129→    size?: { width: number; height: number },
+   130→  ) => ArchZone;
+   131→  updateZone: (
+   132→    zoneId: string,
+   133→    patch: Partial<Pick<ArchZone, "label" | "color">> & {
+   134→      position?: { x: number; y: number };
+   135→      size?: { width: number; height: number };
+   136→    },
+   137→  ) => void;
+   138→  deleteZone: (zoneId: string) => void;
+   139→  rename: (name: string) => void;
+   140→  setScenario: (patch: Partial<ScenarioConfig>) => void;
+   141→  markSaved: (architectureId?: string) => void;
+   142→  loadArchitecture: (arch: Architecture) => void;
+   143→  loadTemplate: (data: ArchitectureData, exerciseHint?: string | null) => void;
+   144→  reset: () => void;
+   145→  toArchitectureData: () => ArchitectureData;
+   146→
+   147→  /* --- sélection --- */
+   148→  setSelection: (nodeIds: string[], edgeIds: string[]) => void;
+   149→  selectNode: (nodeId: string) => void;
+   150→  selectEdge: (edgeId: string) => void;
+   151→  selectZone: (zoneId: string) => void;
+   152→  clearSelection: () => void;
+   153→
+   154→  /* --- édition --- */
+   155→  deleteSelection: () => void;
+   156→  duplicateSelection: () => void;
+   157→  copySelection: () => void;
+   158→  paste: () => void;
+   159→
+   160→  /* --- historique --- */
+   161→  beginHistorySnapshot: () => void;
+   162→  endDrag: () => void;
+   163→  undo: () => void;
+   164→  redo: () => void;
+   165→
+   166→  /* --- UI --- */
+   167→  toggleLibrary: () => void;
+   168→  setLibraryOpen: (open: boolean) => void;
+   169→  toggleConfig: () => void;
+   170→  setConfigOpen: (open: boolean) => void;
+   171→  setConfigTab: (tab: EditorConfigTab) => void;
+   172→  toggleSimulationBar: () => void;
+   173→  setSimulationBarOpen: (open: boolean) => void;
+   174→  setExerciseHint: (hint: string | null) => void;
+   175→}
+   176→
+   177→/* ------------------------------------------------------------------ */
+   178→/* Helpers internes                                                    */
+   179→/* ------------------------------------------------------------------ */
+   180→
+   181→const HISTORY_CAPACITY = 50;
+   182→const COALESCE_WINDOW_MS = 800;
+   183→
+   184→/** Flag de session de drag (hors état React : pas de re-render attendu). */
+   185→let dragActive = false;
+   186→/** Dernière poussée d'historique coalescée (tag + horodatage). */
+   187→let lastCoalesced: { tag: string; at: number } | null = null;
+   188→
+   189→function snapshotOf(s: EditorState): DocSnapshot {
+   190→  // Sérialisation JSON : garantit l'absence de références partagées.
+   191→  return JSON.parse(
+   192→    JSON.stringify({
+   193→      name: s.name,
+   194→      description: s.description,
+   195→      nodes: s.nodes,
+   196→      edges: s.edges,
+   197→      zones: s.zones,
+   198→      scenario: s.scenario,
+   199→    }),
+   200→  ) as DocSnapshot;
+   201→}
+   202→
+   203→/** Partiel {past, future} à merger dans set() pour pousser l'historique. */
+   204→function historyPush(s: EditorState): { past: DocSnapshot[]; future: DocSnapshot[] } {
+   205→  return {
+   206→    past: [...s.past, snapshotOf(s)].slice(-HISTORY_CAPACITY),
+   207→    future: [],
+   208→  };
+   209→}
+   210→
+   211→/**
+   212→ * Coalescence : renvoie true s'il faut pousser un snapshot (début de rafale),
+   213→ * false si la modification fait suite à une poussée récente du même tag.
+   214→ */
+   215→function shouldPushCoalesced(tag: string, windowMs = COALESCE_WINDOW_MS): boolean {
+   216→  const now = Date.now();
+   217→  if (lastCoalesced && lastCoalesced.tag === tag && now - lastCoalesced.at < windowMs) {
+   218→    lastCoalesced.at = now; // prolonge la session d'édition continue
+   219→    return false;
+   220→  }
+   221→  lastCoalesced = { tag, at: now };
+   222→  return true;
+   223→}
+   224→
+   225→function applySnapshot(snap: DocSnapshot): {
+   226→  name: string;
+   227→  description: string;
+   228→  nodes: ArchNode[];
+   229→  edges: ArchEdge[];
+   230→  zones: ArchZone[];
+   231→  scenario: ScenarioConfig;
+   232→} {
+   233→  return {
+   234→    name: snap.name,
+   235→    description: snap.description,
+   236→    nodes: snap.nodes.map((n) => ({ ...n, config: { ...n.config } })),
+   237→    edges: snap.edges.map((e) => ({ ...e })),
+   238→    zones: snap.zones.map((z) => ({ ...z })),
+   239→    scenario: { ...snap.scenario },
+   240→  };
+   241→}
+   242→
+   243→function deepCloneNodes(nodes: ArchNode[]): ArchNode[] {
+   244→  return nodes.map((n) => ({ ...n, config: { ...n.config }, position: { ...n.position } }));
+   245→}
+   246→
+   247→function deepCloneEdges(edges: ArchEdge[]): ArchEdge[] {
+   248→  return edges.map((e) => ({ ...e }));
+   249→}
+   250→
+   251→function deepCloneZones(zones: ArchZone[]): ArchZone[] {
+   252→  return zones.map((z) => ({
+   253→    ...z,
+   254→    position: { ...z.position },
+   255→    size: { ...z.size },
+   256→  }));
+   257→}
+   258→
+   259→/** Le nœud est-il dans le rectangle de la zone ? */
+   260→function pointInZone(
+   261→  position: { x: number; y: number },
+   262→  zone: ArchZone,
+   263→): boolean {
+   264→  return (
+   265→    position.x >= zone.position.x &&
+   266→    position.x <= zone.position.x + zone.size.width &&
+   267→    position.y >= zone.position.y &&
+   268→    position.y <= zone.position.y + zone.size.height
+   269→  );
+   270→}
+   271→
+   272→/** Protocole par défaut d'une nouvelle connexion, déduit des rôles simulés. */
+   273→function defaultProtocol(source: ArchNode, target: ArchNode): Protocol {
+   274→  const roles = [
+   275→    getComponentById(source.componentId)?.simRole,
+   276→    getComponentById(target.componentId)?.simRole,
+   277→  ];
+   278→  if (roles.includes("queue")) return "amqp";
+   279→  if (roles.includes("cache")) return "redis";
+   280→  if (roles.includes("database") || roles.includes("replica")) return "sql";
+   281→  if (roles.includes("cdn")) return "https";
+   282→  return "http";
+   283→}
+   284→
+   285→const EMPTY_SELECTION = {
+   286→  selectedNodeIds: [] as string[],
+   287→  selectedNodeId: null,
+   288→  selectedEdgeId: null,
+   289→  selectedZoneId: null,
+   290→};
+   291→
+   292→export const useEditorStore = create<EditorState>((set, get) => ({
+   293→  name: "Architecture sans titre",
+   294→  description: "",
+   295→  architectureId: null,
+   296→  nodes: [],
+   297→  edges: [],
+   298→  zones: [],
+   299→  scenario: { ...DEFAULT_SCENARIO },
+   300→  dirty: false,
+   301→  savedAt: null,
+   302→
+   303→  ...EMPTY_SELECTION,
+   304→
+   305→  copiedNodes: [],
+   306→  copiedEdges: [],
+   307→
+   308→  past: [],
+   309→  future: [],
+   310→
+   311→  libraryOpen: true,
+   312→  configOpen: true,
+   313→  configTab: "configuration",
+   314→  simulationBarOpen: true,
+   315→  exerciseHint: null,
+   316→  docEpoch: 0,
+   317→  revision: 0,
+   318→
+   319→  /* ------------------------- document ------------------------- */
+   320→
+   321→  addNode: (componentId, position, options) => {
+   322→    const component = getComponentById(componentId);
+   323→    if (!component) return null;
+   324→    const s = get();
+   325→    const node: ArchNode = {
+   326→      id: shortId("n"),
+   327→      componentId,
+   328→      label: component.name,
+   329→      config: getDefaultConfig(componentId),
+   330→      position: { x: position.x, y: position.y },
+   331→      zoneId: s.zones.find((z) => pointInZone(position, z))?.id,
+   332→    };
+   333→    set({
+   334→      ...historyPush(s),
+   335→      nodes: [...s.nodes, node],
+   336→      dirty: true,
+   337→      revision: s.revision + 1,
+   338→      ...(options?.select === false
+   339→        ? {}
+   340→        : {
+   341→            selectedNodeIds: [node.id],
+   342→            selectedNodeId: node.id,
+   343→            selectedEdgeId: null,
+   344→            selectedZoneId: null,
+   345→            configOpen: true,
+   346→          }),
+   347→    });
+   348→    return node;
+   349→  },
+   350→
+   351→  updateNodeConfig: (nodeId, key, value) => {
+   352→    const s = get();
+   353→    const push = shouldPushCoalesced(`config:${nodeId}:${key}`) ? historyPush(s) : {};
+   354→    set({
+   355→      ...push,
+   356→      nodes: s.nodes.map((n) =>
+   357→        n.id === nodeId ? { ...n, config: { ...n.config, [key]: value } } : n,
+   358→      ),
+   359→      dirty: true,
+   360→      revision: s.revision + 1,
+   361→    });
+   362→  },
+   363→
+   364→  resetNodeConfig: (nodeId) => {
+   365→    const s = get();
+   366→    const node = s.nodes.find((n) => n.id === nodeId);
+   367→    if (!node) return;
+   368→    set({
+   369→      ...historyPush(s),
+   370→      nodes: s.nodes.map((n) =>
+   371→        n.id === nodeId ? { ...n, config: getDefaultConfig(n.componentId) } : n,
+   372→      ),
+   373→      dirty: true,
+   374→      revision: s.revision + 1,
+   375→    });
+   376→  },
+   377→
+   378→  renameNode: (nodeId, label) => {
+   379→    const s = get();
+   380→    // Aucun trim ici : l'édition inline doit accepter les espaces
+   381→    // pendant la saisie ; les appelants triment au commit.
+   382→    const next = label.slice(0, 80);
+   383→    const node = s.nodes.find((n) => n.id === nodeId);
+   384→    if (!node || next === node.label) return;
+   385→    const push = shouldPushCoalesced(`rename-node:${nodeId}`) ? historyPush(s) : {};
+   386→    set({
+   387→      ...push,
+   388→      nodes: s.nodes.map((n) => (n.id === nodeId ? { ...n, label: next } : n)),
+   389→      dirty: true,
+   390→      revision: s.revision + 1,
+   391→    });
+   392→  },
+   393→
+   394→  moveNode: (nodeId, position) => {
+   395→    // Pas de poussée d'historique : voir beginHistorySnapshot/endDrag.
+   396→    const s = get();
+   397→    set({
+   398→      nodes: s.nodes.map((n) => (n.id === nodeId ? { ...n, position } : n)),
+   399→      dirty: true,
+   400→      revision: s.revision + 1,
+   401→    });
+   402→  },
+   403→
+   404→  addEdge: (source, target) => {
+   405→    const s = get();
+   406→    const sourceNode = s.nodes.find((n) => n.id === source);
+   407→    const targetNode = s.nodes.find((n) => n.id === target);
+   408→    if (!sourceNode || !targetNode) {
+   409→      return { ok: false, reason: "Composant introuvable." };
+   410→    }
+   411→    const validation = validateConnection(
+   412→      sourceNode.componentId,
+   413→      targetNode.componentId,
+   414→      source,
+   415→      target,
+   416→      s.edges,
+   417→    );
+   418→    if (!validation.valid) {
+   419→      return { ok: false, reason: validation.reason };
+   420→    }
+   421→    const edge: ArchEdge = {
+   422→      id: shortId("e"),
+   423→      source,
+   424→      target,
+   425→      protocol: defaultProtocol(sourceNode, targetNode),
+   426→      networkLatencyMs: 2,
+   427→      bandwidthMbps: 100,
+   428→    };
+   429→    set({
+   430→      ...historyPush(s),
+   431→      edges: [...s.edges, edge],
+   432→      dirty: true,
+   433→      revision: s.revision + 1,
+   434→      selectedEdgeId: edge.id,
+   435→      selectedNodeIds: [],
+   436→      selectedNodeId: null,
+   437→      selectedZoneId: null,
+   438→    });
+   439→    return { ok: true };
+   440→  },
+   441→
+   442→  checkConnection: (source, target) => {
+   443→    const s = get();
+   444→    const sourceNode = s.nodes.find((n) => n.id === source);
+   445→    const targetNode = s.nodes.find((n) => n.id === target);
+   446→    if (!sourceNode || !targetNode) return { valid: false };
+   447→    return validateConnection(
+   448→      sourceNode.componentId,
+   449→      targetNode.componentId,
+   450→      source,
+   451→      target,
+   452→      s.edges,
+   453→    );
+   454→  },
+   455→
+   456→  updateEdge: (edgeId, patch) => {
+   457→    const s = get();
+   458→    const push = shouldPushCoalesced(`edge:${edgeId}`) ? historyPush(s) : {};
+   459→    set({
+   460→      ...push,
+   461→      edges: s.edges.map((e) => (e.id === edgeId ? { ...e, ...patch } : e)),
+   462→      dirty: true,
+   463→      revision: s.revision + 1,
+   464→    });
+   465→  },
+   466→
+   467→  deleteEdge: (edgeId) => {
+   468→    const s = get();
+   469→    if (!s.edges.some((e) => e.id === edgeId)) return;
+   470→    set({
+   471→      ...historyPush(s),
+   472→      edges: s.edges.filter((e) => e.id !== edgeId),
+   473→      dirty: true,
+   474→      revision: s.revision + 1,
+   475→      ...(s.selectedEdgeId === edgeId ? { selectedEdgeId: null } : {}),
+   476→    });
+   477→  },
+   478→
+   479→  addZone: (
+   480→    label = "Nouvelle zone",
+   481→    color = "indigo",
+   482→    position = { x: 120, y: 120 },
+   483→    size = { width: 460, height: 320 },
+   484→  ) => {
+   485→    const s = get();
+   486→    const zone: ArchZone = { id: shortId("z"), label, color, position, size };
+   487→    set({
+   488→      ...historyPush(s),
+   489→      zones: [...s.zones, zone],
+   490→      dirty: true,
+   491→      revision: s.revision + 1,
+   492→      selectedZoneId: zone.id,
+   493→      selectedNodeIds: [],
+   494→      selectedNodeId: null,
+   495→      selectedEdgeId: null,
+   496→      configOpen: true,
+   497→    });
+   498→    return zone;
+   499→  },
+   500→
+   501→  updateZone: (zoneId, patch) => {
+   502→    const s = get();
+   503→    const push = shouldPushCoalesced(`zone:${zoneId}`) ? historyPush(s) : {};
+   504→    set({
+   505→      ...push,
+   506→      zones: s.zones.map((z) => (z.id === zoneId ? { ...z, ...patch } : z)),
+   507→      dirty: true,
+   508→      revision: s.revision + 1,
+   509→    });
+   510→  },
+   511→
+   512→  deleteZone: (zoneId) => {
+   513→    const s = get();
+   514→    if (!s.zones.some((z) => z.id === zoneId)) return;
+   515→    set({
+   516→      ...historyPush(s),
+   517→      zones: s.zones.filter((z) => z.id !== zoneId),
+   518→      nodes: s.nodes.map((n) =>
+   519→        n.zoneId === zoneId ? { ...n, zoneId: undefined } : n,
+   520→      ),
+   521→      dirty: true,
+   522→      revision: s.revision + 1,
+   523→      ...(s.selectedZoneId === zoneId ? { selectedZoneId: null } : {}),
+   524→    });
+   525→  },
+   526→
+   527→  rename: (name) => {
+   528→    // Aucun trim : les appelants (édition inline) triment au commit.
+   529→    const next = name.slice(0, 120);
+   530→    const s = get();
+   531→    if (!next || next === s.name) return;
+   532→    set({
+   533→      ...historyPush(s),
+   534→      name: next,
+   535→      dirty: true,
+   536→      revision: s.revision + 1,
+   537→    });
+   538→  },
+   539→
+   540→  setScenario: (patch) => {
+   541→    const s = get();
+   542→    const push = shouldPushCoalesced("scenario", 900) ? historyPush(s) : {};
+   543→    set({
+   544→      ...push,
+   545→      scenario: { ...s.scenario, ...patch },
+   546→      dirty: true,
+   547→      revision: s.revision + 1,
+   548→    });
+   549→  },
+   550→
+   551→  markSaved: (architectureId) => {
+   552→    const s = get();
+   553→    set({
+   554→      dirty: false,
+   555→      savedAt: new Date().toISOString(),
+   556→      architectureId: architectureId ?? s.architectureId,
+   557→    });
+   558→  },
+   559→
+   560→  loadArchitecture: (arch) => {
+   561→    lastCoalesced = null;
+   562→    dragActive = false;
+   563→    set({
+   564→      name: arch.name,
+   565→      description: arch.description ?? "",
+   566→      architectureId: arch.id,
+   567→      nodes: deepCloneNodes(arch.nodes),
+   568→      edges: deepCloneEdges(arch.edges),
+   569→      zones: deepCloneZones(arch.zones),
+   570→      scenario: JSON.parse(JSON.stringify(arch.scenario)) as ScenarioConfig,
+   571→      dirty: false,
+   572→      savedAt: arch.updatedAt,
+   573→      ...EMPTY_SELECTION,
+   574→      past: [],
+   575→      future: [],
+   576→      docEpoch: get().docEpoch + 1,
+   577→      revision: get().revision + 1,
+   578→    });
+   579→  },
+   580→
+   581→  loadTemplate: (data, exerciseHint) => {
+   582→    lastCoalesced = null;
+   583→    dragActive = false;
+   584→    set({
+   585→      name: data.name,
+   586→      description: data.description ?? "",
+   587→      architectureId: null,
+   588→      nodes: deepCloneNodes(data.nodes),
+   589→      edges: deepCloneEdges(data.edges),
+   590→      zones: deepCloneZones(data.zones),
+   591→      scenario: JSON.parse(JSON.stringify(data.scenario)) as ScenarioConfig,
+   592→      dirty: true,
+   593→      savedAt: null,
+   594→      ...EMPTY_SELECTION,
+   595→      past: [],
+   596→      future: [],
+   597→      exerciseHint: exerciseHint ?? null,
+   598→      docEpoch: get().docEpoch + 1,
+   599→      revision: get().revision + 1,
+   600→    });
+   601→  },
+   602→
+   603→  reset: () => {
+   604→    lastCoalesced = null;
+   605→    dragActive = false;
+   606→    set({
+   607→      name: "Architecture sans titre",
+   608→      description: "",
+   609→      architectureId: null,
+   610→      nodes: [],
+   611→      edges: [],
+   612→      zones: [],
+   613→      scenario: JSON.parse(JSON.stringify(DEFAULT_SCENARIO)) as ScenarioConfig,
+   614→      dirty: false,
+   615→      savedAt: null,
+   616→      ...EMPTY_SELECTION,
+   617→      copiedNodes: [],
+   618→      copiedEdges: [],
+   619→      past: [],
+   620→      future: [],
+   621→      exerciseHint: null,
+   622→      docEpoch: get().docEpoch + 1,
+   623→      revision: get().revision + 1,
+   624→    });
+   625→  },
+   626→
+   627→  toArchitectureData: () => {
+   628→    const s = get();
+   629→    return {
+   630→      name: s.name,
+   631→      description: s.description || undefined,
+   632→      nodes: s.nodes,
+   633→      edges: s.edges,
+   634→      zones: s.zones,
+   635→      scenario: s.scenario,
+   636→    };
+   637→  },
+   638→
+   639→  /* ------------------------- sélection ------------------------- */
+   640→
+   641→  setSelection: (nodeIds, edgeIds) => {
+   642→    const s = get();
+   643→    const primaryNodeId = nodeIds.length > 0 ? nodeIds[nodeIds.length - 1] : null;
+   644→    const primaryEdgeId = edgeIds.length === 1 ? edgeIds[0] : null;
+   645→    const hasSelection = nodeIds.length > 0 || primaryEdgeId !== null;
+   646→    set({
+   647→      selectedNodeIds: nodeIds,
+   648→      selectedNodeId: primaryNodeId,
+   649→      selectedEdgeId: primaryEdgeId,
+   650→      selectedZoneId: hasSelection ? null : s.selectedZoneId,
+   651→      configOpen: hasSelection ? true : s.configOpen,
+   652→      configTab:
+   653→        primaryNodeId !== null && primaryNodeId !== s.selectedNodeId
+   654→          ? "configuration"
+   655→          : s.configTab,
+   656→    });
+   657→  },
+   658→
+   659→  selectNode: (nodeId) => {
+   660→    set({
+   661→      selectedNodeIds: [nodeId],
+   662→      selectedNodeId: nodeId,
+   663→      selectedEdgeId: null,
+   664→      selectedZoneId: null,
+   665→      configOpen: true,
+   666→    });
+   667→  },
+   668→
+   669→  selectEdge: (edgeId) => {
+   670→    set({
+   671→      selectedNodeIds: [],
+   672→      selectedNodeId: null,
+   673→      selectedEdgeId: edgeId,
+   674→      selectedZoneId: null,
+   675→      configOpen: true,
+   676→    });
+   677→  },
+   678→
+   679→  selectZone: (zoneId) => {
+   680→    set({
+   681→      selectedNodeIds: [],
+   682→      selectedNodeId: null,
+   683→      selectedEdgeId: null,
+   684→      selectedZoneId: zoneId,
+   685→      configOpen: true,
+   686→    });
+   687→  },
+   688→
+   689→  clearSelection: () => set({ ...EMPTY_SELECTION }),
+   690→
+   691→  /* ------------------------- édition ------------------------- */
+   692→
+   693→  deleteSelection: () => {
+   694→    const s = get();
+   695→    const removingNodes = s.selectedNodeIds;
+   696→    const removingEdge = s.selectedEdgeId;
+   697→    const removingZone = s.selectedZoneId;
+   698→    if (
+   699→      removingNodes.length === 0 &&
+   700→      !removingEdge &&
+   701→      !removingZone
+   702→    ) {
+   703→      return;
+   704→    }
+   705→    let nodes = s.nodes;
+   706→    let edges = s.edges;
+   707→    let zones = s.zones;
+   708→    if (removingNodes.length > 0) {
+   709→      const removed = new Set(removingNodes);
+   710→      nodes = s.nodes.filter((n) => !removed.has(n.id));
+   711→      edges = s.edges.filter((e) => !removed.has(e.source) && !removed.has(e.target));
+   712→    } else if (removingEdge) {
+   713→      edges = s.edges.filter((e) => e.id !== removingEdge);
+   714→    } else if (removingZone) {
+   715→      zones = s.zones.filter((z) => z.id !== removingZone);
+   716→      nodes = s.nodes.map((n) => (n.zoneId === removingZone ? { ...n, zoneId: undefined } : n));
+   717→    }
+   718→    // Une panne simulée visant un nœud supprimé est retirée du scénario.
+   719→    const failure = s.scenario.failure;
+   720→    const scenario =
+   721→      failure && removingNodes.includes(failure.nodeId)
+   722→        ? { ...s.scenario, failure: null }
+   723→        : s.scenario;
+   724→    set({
+   725→      ...historyPush(s),
+   726→      nodes,
+   727→      edges,
+   728→      zones,
+   729→      scenario,
+   730→      dirty: true,
+   731→      revision: s.revision + 1,
+   732→      ...EMPTY_SELECTION,
+   733→    });
+   734→  },
+   735→
+   736→  duplicateSelection: () => {
+   737→    const s = get();
+   738→    if (s.selectedNodeIds.length === 0) return;
+   739→    const idMap = new Map<string, string>();
+   740→    const clones: ArchNode[] = s.nodes
+   741→      .filter((n) => s.selectedNodeIds.includes(n.id))
+   742→      .map((n) => {
+   743→        const id = shortId("n");
+   744→        idMap.set(n.id, id);
+   745→        return {
+   746→          ...n,
+   747→          id,
+   748→          position: { x: n.position.x + 48, y: n.position.y + 48 },
+   749→          config: { ...n.config },
+   750→        };
+   751→      });
+   752→    if (clones.length === 0) return;
+   753→    const clonedEdges: ArchEdge[] = s.edges
+   754→      .filter((e) => idMap.has(e.source) && idMap.has(e.target))
+   755→      .map((e) => ({
+   756→        ...e,
+   757→        id: shortId("e"),
+   758→        source: idMap.get(e.source) as string,
+   759→        target: idMap.get(e.target) as string,
+   760→      }));
+   761→    set({
+   762→      ...historyPush(s),
+   763→      nodes: [...s.nodes, ...clones],
+   764→      edges: [...s.edges, ...clonedEdges],
+   765→      dirty: true,
+   766→      revision: s.revision + 1,
+   767→      selectedNodeIds: clones.map((c) => c.id),
+   768→      selectedNodeId: clones[clones.length - 1].id,
+   769→      selectedEdgeId: null,
+   770→      selectedZoneId: null,
+   771→    });
+   772→  },
+   773→
+   774→  copySelection: () => {
+   775→    const s = get();
+   776→    if (s.selectedNodeIds.length > 0) {
+   777→      const selected = new Set(s.selectedNodeIds);
+   778→      set({
+   779→        copiedNodes: deepCloneNodes(s.nodes.filter((n) => selected.has(n.id))),
+   780→        copiedEdges: deepCloneEdges(
+   781→          s.edges.filter((e) => selected.has(e.source) && selected.has(e.target)),
+   782→        ),
+   783→      });
+   784→      return;
+   785→    }
+   786→    if (s.selectedEdgeId) {
+   787→      const edge = s.edges.find((e) => e.id === s.selectedEdgeId);
+   788→      if (edge) set({ copiedNodes: [], copiedEdges: [{ ...edge }] });
+   789→    }
+   790→  },
+   791→
+   792→  paste: () => {
+   793→    const s = get();
+   794→    if (s.copiedNodes.length === 0 && s.copiedEdges.length === 0) return;
+   795→    const idMap = new Map(s.copiedNodes.map((n) => [n.id, shortId("n")]));
+   796→    const newNodes: ArchNode[] = s.copiedNodes.map((n) => ({
+   797→      ...n,
+   798→      id: idMap.get(n.id) as string,
+   799→      position: { x: n.position.x + 48, y: n.position.y + 48 },
+   800→      config: { ...n.config },
+   801→    }));
+   802→    const validIds = new Set([...s.nodes.map((n) => n.id), ...newNodes.map((n) => n.id)]);
+   803→    const newEdges: ArchEdge[] = s.copiedEdges
+   804→      .map((e) => ({
+   805→        ...e,
+   806→        id: shortId("e"),
+   807→        source: idMap.get(e.source) ?? e.source,
+   808→        target: idMap.get(e.target) ?? e.target,
+   809→      }))
+   810→      .filter((e) => validIds.has(e.source) && validIds.has(e.target));
+   811→    set({
+   812→      ...historyPush(s),
+   813→      nodes: [...s.nodes, ...newNodes],
+   814→      edges: [...s.edges, ...newEdges],
+   815→      dirty: true,
+   816→      revision: s.revision + 1,
+   817→      selectedNodeIds: newNodes.map((n) => n.id),
+   818→      selectedNodeId: newNodes.length > 0 ? newNodes[newNodes.length - 1].id : null,
+   819→      selectedEdgeId: null,
+   820→      selectedZoneId: null,
+   821→      configOpen: newNodes.length > 0 ? true : s.configOpen,
+   822→    });
+   823→  },
+   824→
+   825→  /* ------------------------- historique ------------------------- */
+   826→
+   827→  beginHistorySnapshot: () => {
+   828→    if (dragActive) return;
+   829→    dragActive = true;
+   830→    set((s) => ({ ...historyPush(s) }));
+   831→  },
+   832→
+   833→  endDrag: () => {
+   834→    dragActive = false;
+   835→  },
+   836→
+   837→  undo: () => {
+   838→    const s = get();
+   839→    if (s.past.length === 0) return;
+   840→    const previous = s.past[s.past.length - 1];
+   841→    const current = snapshotOf(s);
+   842→    dragActive = false;
+   843→    lastCoalesced = null;
+   844→    set({
+   845→      ...applySnapshot(previous),
+   846→      past: s.past.slice(0, -1),
+   847→      future: [current, ...s.future].slice(0, HISTORY_CAPACITY),
+   848→      dirty: true,
+   849→      revision: s.revision + 1,
+   850→      ...EMPTY_SELECTION,
+   851→    });
+   852→  },
+   853→
+   854→  redo: () => {
+   855→    const s = get();
+   856→    if (s.future.length === 0) return;
+   857→    const next = s.future[0];
+   858→    const current = snapshotOf(s);
+   859→    dragActive = false;
+   860→    lastCoalesced = null;
+   861→    set({
+   862→      ...applySnapshot(next),
+   863→      past: [...s.past, current].slice(-HISTORY_CAPACITY),
+   864→      future: s.future.slice(1),
+   865→      dirty: true,
+   866→      revision: s.revision + 1,
+   867→      ...EMPTY_SELECTION,
+   868→    });
+   869→  },
+   870→
+   871→  /* ------------------------- UI ------------------------- */
+   872→
+   873→  toggleLibrary: () => set((s) => ({ libraryOpen: !s.libraryOpen })),
+   874→  setLibraryOpen: (open) => set({ libraryOpen: open }),
+   875→  toggleConfig: () => set((s) => ({ configOpen: !s.configOpen })),
+   876→  setConfigOpen: (open) => set({ configOpen: open }),
+   877→  setConfigTab: (tab) => set({ configTab: tab }),
+   878→  toggleSimulationBar: () => set((s) => ({ simulationBarOpen: !s.simulationBarOpen })),
+   879→  setSimulationBarOpen: (open) => set({ simulationBarOpen: open }),
+   880→  setExerciseHint: (hint) => set({ exerciseHint: hint }),
+   881→}));
+   882→

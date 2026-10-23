@@ -1,0 +1,562 @@
+    48→
+    49→const SEVERITY_RANK: Record<DiagnosticSeverity, number> = {
+    50→  critical: 0,
+    51→  warning: 1,
+    52→  info: 2,
+    53→};
+    54→
+    55→interface Ctx {
+    56→  input: DiagnosticsInput;
+    57→  byId: Map<string, { rt: NodeRuntime; nm: NodeMetrics; ex: NodeExtra }>;
+    58→}
+    59→
+    60→function pct(n: number, digits = 1): string {
+    61→  return formatPercent(n, digits);
+    62→}
+    63→
+    64→function mixReadShare(c: Ctx, nodeId: string): number {
+    65→  const ex = c.input.extras.get(nodeId);
+    66→  if (!ex) return c.input.scenario.readRatio;
+    67→  const total = ex.readArrivals + ex.writeArrivals;
+    68→  if (total <= 0) return c.input.scenario.readRatio;
+    69→  return ex.readArrivals / total;
+    70→}
+    71→
+    72→function sol(label: string, how: string, conditions: string, tradeoffs: string): DiagnosticSolution {
+    73→  return { label, how, conditions, tradeoffs };
+    74→}
+    75→
+    76→/* ============================================================
+    77→ * Solutions par rôle (adaptées au mix lecture/écriture)
+    78→ * ============================================================ */
+    79→
+    80→function capacitySolutions(c: Ctx, rt: NodeRuntime, mix: number): DiagnosticSolution[] {
+    81→  const readsDominant = mix >= 0.5;
+    82→  const out: DiagnosticSolution[] = [];
+    83→  switch (rt.role) {
+    84→    case "server":
+    85→      out.push(
+    86→        sol(
+    87→          "Ajouter des instances",
+    88→          `Passer de ${rt.rc.instances} à ${rt.rc.instances * 2} instances identiques derrière le répartiteur : la capacité par rôle croît linéairement.`,
+    89→          "Le temps de traitement moyen est déjà raisonnable et le composant est stateless.",
+    90→          "Coût proportionnel ; la charge aval (base, cache) augmente d'autant — vérifiez qu'elle suit.",
+    91→        ),
+    92→        sol(
+    93→          "Optimiser le temps de traitement",
+    94→          "Profiler le code (requêtes N+1, sérialisation, CPU) pour réduire avgServiceMs : c'est le seul levier qui améliore latence ET débit simultanément.",
+    95→          "Le profilage révèle des goulots applicatifs (CPU, I/O, allocations).",
+    96→          "Effort d'ingénierie ; gains plafonnés par les dépendances aval.",
+    97→        ),
+    98→      );
+    99→      if (readsDominant) {
+   100→        out.push(
+   101→          sol(
+   102→            "Mettre en cache les lectures",
+   103→            "Intercaler un cache (Redis) entre les serveurs et la base pour les lectures répétées — le flux observé est à " +
+   104→              pct(mix) +
+   105→              " de lectures.",
+   106→            "Forte réutilisation des mêmes lectures (sessions, catalogue, référence).",
+   107→            "Incohérences possibles (TTL/invalidation) ; mémoire supplémentaire ; n'accélère pas les écritures.",
+   108→          ),
+   109→        );
+   110→      } else {
+   111→        out.push(
+   112→          sol(
+   113→            "Extraire les écritures vers une file",
+   114→            "Publier les écritures dans une file et les traiter par des workers asynchrones : le serveur répond 202 immédiatement — le flux observé est à " +
+   115→              pct(1 - mix) +
+   116→              " d'écritures.",
+   117→            "Les écritures n'exigent pas une réponse synchrone à l'utilisateur.",
+   118→            "Cohérence à terme (eventual consistency) ; complexité opérationnelle ; supervision des files et retries.",
+   119→          ),
+   120→        );
+   121→      }
+   122→      break;
+   123→    case "database": {
+   124→      out.push(
+   125→        sol(
+   126→          "Augmenter le pool de connexions",
+   127→          `Passer maxConnections de ${rt.rc.maxConnections} à ${Math.round(rt.rc.maxConnections * 1.5)} : capacité ≈ connexions / temps moyen.`,
+   128→          "Le temps moyen par requête est sain et l'attente vient du pool.",
+   129→          "Chaque connexion consomme mémoire + un process côté SGBD ; au-delà d'un point, le CPU et les verrous deviennent limitants.",
+   130→        ),
+   131→        sol(
+   132→          "Réduire le temps par requête",
+   133→          "Optimiser les requêtes (index, plans d'exécution, requêtes N+1) : agit sur avgReadMs/avgWriteMs, donc directement sur la capacité.",
+   134→          "Le pool n'est pas saturé mais chaque requête est lente.",
+   135→          "Nécessite du profilage (EXPLAIN, slow query log) ; maintenance des index.",
+   136→        ),
+   137→      );
+   138→      if (readsDominant) {
+   139→        out.push(
+   140→          sol(
+   141→            "Décharger les lectures (cache + réplicas)",
+   142→            "Ajouter un cache applicatif pour les lectures chaudes et, au-delà, des réplicas de lecture — le flux arrivant est à " +
+   143→              pct(mix) +
+   144→              " de lectures, donc dimensionnable horizontalement.",
+   145→            "Flux dominant en lectures avec réutilisation (la clé : le taux de hit).",
+   146→            "Délai de réplication (lectures légèrement périmées) ; coût par réplica ; l'application doit router lectures/écritures.",
+   147→          ),
+   148→        );
+   149→      } else {
+   150→        out.push(
+   151→          sol(
+   152→            "Lisser et répartir les écritures",
+   153→            "Le flux est à " +
+   154→              pct(1 - mix) +
+   155→              " d'écritures : ajouter des réplicas de lecture n'y changerait rien. lisser par une file tampon, réduire fsync par batch, partitionner/sharder les tables chaudes.",
+   156→            "Écritures dominantes et besoin de tenir le débit.",
+   157→            "Sharding = complexité applicative forte ; batching retarde la durabilité ; la file introduit de l'asynchrone.",
+   158→          ),
+   159→        );
+   160→      }
+   161→      break;
+   162→    }
+   163→    case "replica":
+   164→      out.push(
+   165→        sol(
+   166→          "Ajouter des réplicas",
+   167→          `Passer de ${rt.rc.instances} à ${rt.rc.instances + 1} réplicas de lecture : les lectures se répartissent entre copies.`,
+   168→          "Flux de lectures croissant (ce composant ne sert jamais les écritures).",
+   169→          "Coût par réplica ; délai de réplication ; attention : si le flux global est dominé par les écritures, c'est la primaire qu'il faut soulager, pas les réplicas.",
+   170→        ),
+   171→      );
+   172→      break;
+   173→    case "cache":
+   174→      out.push(
+   175→        sol(
+   176→          "Monter la mémoire (working set)",
+   177→          `Passer de ${rt.rc.memoryGb} à ${rt.rc.memoryGb * 2} Go : un working set plus large retient les clés chaudes et augmente le taux de hit.`,
+   178→          "Le taux de hit est limité par les évictions (clés expulsées avant leur réutilisation).",
+   179→          "Coût mémoire (le Go de RAM est cher) ; à taille égale, préférez améliorer la réutilisation.",
+   180→        ),
+   181→        sol(
+   182→          "Augmenter les connexions",
+   183→          `maxConnections ${rt.rc.maxConnections} → ${Math.round(rt.rc.maxConnections * 1.5)} si l'attente vient du pool de connexions.`,
+   184→          "Les clients attendent une connexion (file d'attente côté cache).",
+   185→          "Chaque connexion consomme un peu de mémoire et de CPU (context switching).",
+   186→        ),
+   187→      );
+   188→      break;
+   189→    case "balancer":
+   190→    case "cdn":
+   191→    case "proxy":
+   192→    case "storage":
+   193→      out.push(
+   194→        sol(
+   195→          "Augmenter la capacité",
+   196→          `capacityRps ${formatRps(rt.rc.capacityRps)} → ${formatRps(rt.rc.capacityRps * 2)}${
+   197→            rt.role === "balancer" ? " (ou le nombre d'instances du répartiteur)" : ""
+   198→          }.`,
+   199→          "Le rejet vient du dépassement de capacité en débit, pas des cibles aval.",
+   200→          "Coût du service géré ; vérifier que l'aval absorbe le débit supplémentaire.",
+   201→        ),
+   202→      );
+   203→      break;
+   204→    case "queue":
+   205→      out.push(
+   206→        sol(
+   207→          "Renforcer les workers aval",
+   208→          "Ajouter des consommateurs : le débit d'une file est celui de ses workers (instances × concurrence / temps de traitement).",
+   209→          "La profondeur de file grandit alors que les workers sont saturés.",
+   210→          "La dépendance aval (base…) doit absorber le débit des workers supplémentaires.",
+   211→        ),
+   212→        sol(
+   213→          "Ajouter des partitions",
+   214→          `partitions ${rt.rc.partitions} → ${rt.rc.partitions * 2} : répartit le stockage et le débit d'ingestion.`,
+   215→          "Le producteur est bridé par l'ingestion de la file elle-même.",
+   216→          "Rééquilibrage des consommateurs ; clés de partition à choisir soigneusement.",
+   217→        ),
+   218→      );
+   219→      break;
+   220→    case "worker":
+   221→      out.push(
+   222→        sol(
+   223→          "Ajouter des instances de worker",
+   224→          `instances ${rt.rc.instances} → ${rt.rc.instances * 2} : le débit de traitement croît linéairement.`,
+   225→          "Les messages s'accumulent en amont et les workers sont saturés.",
+   226→          "Coût proportionnel ; la dépendance aval (base) reçoit le double de débit.",
+   227→        ),
+   228→        sol(
+   229→          "Réduire avgProcessingMs",
+   230→          "Optimiser le traitement (batch, I/O, algorithmique) : temps par message plus court ⇒ débit plus grand sans instance.",
+   231→          "Le temps de traitement contient des phases optimisables (I/O séquentielles, batches).",
+   232→          "Effort de développement ; certains traitements ne sont pas compressibles.",
+   233→        ),
+   234→      );
+   235→      break;
+   236→    default:
+   237→      out.push(
+   238→        sol(
+   239→          "Renforcer ce composant",
+   240→          "Augmenter sa capacité nominale ou le nombre d'instances.",
+   241→          "Le composant est le facteur limitant du chemin.",
+   242→          "Coût ; vérifier l'aval avant d'augmenter le débit amont.",
+   243→        ),
+   244→      );
+   245→  }
+   246→  return out;
+   247→}
+   248→
+   249→/* ============================================================
+   250→ * Règles de diagnostic
+   251→ * ============================================================ */
+   252→
+   253→type Rule = (c: Ctx) => Diagnostic[];
+   254→
+   255→function mk(
+   256→  id: string,
+   257→  severity: DiagnosticSeverity,
+   258→  title: string,
+   259→  nodeId: string | undefined,
+   260→  nodeLabel: string | undefined,
+   261→  evidence: { label: string; value: string }[],
+   262→  cause: string,
+   263→  explanation: string,
+   264→  solutions: DiagnosticSolution[],
+   265→): Diagnostic {
+   266→  // Identifiant garanti unique : suffixé par le nœud concerné le cas échéant.
+   267→  const d: Diagnostic = {
+   268→    id: nodeId ? `${id}--${nodeId}` : id,
+   269→    severity,
+   270→    title,
+   271→    evidence,
+   272→    cause,
+   273→    explanation,
+   274→    solutions,
+   275→  };
+   276→  if (nodeId) d.nodeId = nodeId;
+   277→  if (nodeLabel) d.nodeLabel = nodeLabel;
+   278→  return d;
+   279→}
+   280→
+   281→/** R1/R2 — saturation (≥ 0,95 critique, ≥ 0,8 avertissement). */
+   282→const ruleSaturation: Rule = (c) => {
+   283→  const out: Diagnostic[] = [];
+   284→  const entries = [...c.byId.values()]
+   285→    .filter((e) => e.rt.role !== "generator" && e.nm.arrivals > 0)
+   286→    .sort((a, b) => b.nm.utilization - a.nm.utilization || a.rt.id.localeCompare(b.rt.id));
+   287→  for (const e of entries) {
+   288→    const util = e.nm.utilization;
+   289→    if (util < 0.8) continue;
+   290→    const severity: DiagnosticSeverity = util >= 0.95 ? "critical" : "warning";
+   291→    const mix = mixReadShare(c, e.rt.id);
+   292→    out.push(
+   293→      mk(
+   294→        util >= 0.95 ? "saturation-critique" : "saturation-elevee",
+   295→        severity,
+   296→        util >= 0.95 ? "Saturation critique" : "Saturation élevée",
+   297→        e.rt.id,
+   298→        e.rt.label,
+   299→        [
+   300→          { label: "Utilisation moyenne", value: pct(util) },
+   301→          { label: "Utilisation maximale", value: pct(e.nm.utilizationMax) },
+   302→          { label: "Capacité théorique", value: formatRps(e.nm.capacityRps) },
+   303→          { label: "Débit traité", value: formatRps(e.nm.throughputRps) },
+   304→          { label: "Attente p95", value: formatMs(e.nm.p95WaitMs) },
+   305→        ],
+   306→        `Le composant fonctionne à ${pct(util)} de sa capacité (${formatRps(
+   307→          e.nm.throughputRps,
+   308→        )} traités pour ${formatRps(e.nm.capacityRps)} théoriques) : chaque requête arrive à trouver les ressources occupées.`,
+   309→        `La loi de Little (L = λ × W) impose un choix : au-delà de ~80 % d'utilisation, l'attente moyenne croît de façon hyperbolique — doubler la charge résiduelle double peu le débit mais démultiplie la latence. Un composant saturé n'est pas seulement lent : il rejette (files pleines) et propage l'attente à toute la chaîne amont, qui finit elle-même par saturer. Les solutions ci-dessous sont ordonnées par rapport efficacité/coût pour ce rôle et ce mix (${pct(
+   310→          mix,
+   311→        )} de lectures).`,
+   312→        capacitySolutions(c, e.rt, mix),
+   313→      ),
+   314→    );
+   315→  }
+   316→  return out.slice(0, 4); // éviter le spam : les 4 plus saturés
+   317→};
+   318→
+   319→/** R3 — file instable (ρ ≥ 1). */
+   320→const ruleUnstableQueue: Rule = (c) => {
+   321→  const out: Diagnostic[] = [];
+   322→  for (const e of c.byId.values()) {
+   323→    if (e.rt.role === "generator" || e.nm.arrivals <= 0) continue;
+   324→    if (e.nm.utilization < 1 && e.rt.role !== "queue") continue;
+   325→    if (e.rt.role === "queue") {
+   326→      // files : instabilité = profondeur qui ne se vide pas
+   327→      if (e.ex.queueDepthEnd <= 0 || e.nm.maxQueueLength <= 0) continue;
+   328→      if (e.ex.queueDepthEnd < Math.max(5, e.ex.queueDepthMax * 0.25)) continue;
+   329→    } else if (e.nm.utilization < 1) {
+   330→      continue;
+   331→    }
+   332→    const mix = mixReadShare(c, e.rt.id);
+   333→    out.push(
+   334→      mk(
+   335→        "file-instable",
+   336→        "critical",
+   337→        "File d'attente instable (ρ ≥ 1)",
+   338→        e.rt.id,
+   339→        e.rt.label,
+   340→        [
+   341→          { label: "Utilisation moyenne", value: pct(e.nm.utilization) },
+   342→          { label: "File moyenne", value: `${formatNumber(Math.round(e.nm.avgQueueLength))} requêtes` },
+   343→          { label: "File maximale", value: `${formatNumber(Math.round(e.nm.maxQueueLength))} requêtes` },
+   344→          { label: "Débit traité", value: formatRps(e.nm.throughputRps) },
+   345→        ],
+   346→        `Le taux d'arrivée dépasse la capacité de service : la file s'allonge sans limite pendant la simulation (${formatNumber(
+   347→          Math.round(e.nm.avgQueueLength),
+   348→        )} requêtes en moyenne, ${formatNumber(Math.round(e.nm.maxQueueLength))} au pic).`,
+   349→        "Une file est stable si et seulement si ρ = λ / µ < 1. À ρ ≥ 1, chaque seconde ajoute (λ − µ) requêtes : la latence croît linéairement avec le temps et le système ne rattrape jamais, même pendant les creux. Aucun buffering ne sauve un système sous-dimensionné — la file décale le problème (et la douleur) au lieu de le résoudre.",
+   350→        capacitySolutions(c, e.rt, mix).concat([
+   351→          sol(
+   352→            "Limiter le débit entrant",
+   353→            "Placer un rate limiter ou une file tampon bornée en amont : dégrader explicitement (429/503) vaut mieux que laisser la latence exploser pour tout le monde.",
+   354→            "Le pic de charge est temporaire et le client sait réessayer.",
+   355→            "Rejets visibles pour l'utilisateur ; à documenter dans le contrat de service (SLA).",
+   356→          ),
+   357→        ]),
+   358→      ),
+   359→    );
+   360→  }
+   361→  return out.slice(0, 3);
+   362→};
+   363→
+   364→/** R4 — point de défaillance unique. */
+   365→const ruleSpof: Rule = (c) => {
+   366→  const out: Diagnostic[] = [];
+   367→  const trafficRoles: ReadonlySet<SimRole> = new Set(["server", "balancer", "worker", "replica"]);
+   368→  for (const e of c.byId.values()) {
+   369→    if (e.nm.arrivals <= 0) continue;
+   370→    if (trafficRoles.has(e.rt.role) && e.rt.rc.instances <= 1) {
+   371→      out.push(
+   372→        mk(
+   373→          "spof",
+   374→          "warning",
+   375→          "Point de défaillance unique (1 instance)",
+   376→          e.rt.id,
+   377→          e.rt.label,
+   378→          [
+   379→            { label: "Instances", value: "1" },
+   380→            { label: "Rôle", value: e.rt.label },
+   381→            { label: "Débit traité", value: formatRps(e.nm.throughputRps) },
+   382→          ],
+   383→          "Ce composant traite du trafic avec une seule instance : sa panne interrompt tout le chemin qui passe par lui.",
+   384→          "La haute disponibilité se construit par redondance : N+1 instances derrière un répartiteur avec health checks. Une instance unique cumule les modes de défaillance (panne machine, déploiement, mise à jour) — le « zéro downtime » exige au moins deux copies actives.",
+   385→          [
+   386→            sol(
+   387→              "Passer à 2 instances",
+   388→              "Dupliquer le composant et répartir la charge (round-robin ou least-connections) entre les copies.",
+   389→              "Le composant est stateless ou son état est partagé (base, cache).",
+   390→              "Coût ×2 ; l'état local (sessions en mémoire) doit être externalisé.",
+   391→            ),
+   392→            sol(
+   393→              "Activer les health checks",
+   394→              "Configurer le répartiteur amont pour écarter automatiquement les cibles en panne et basculer le trafic.",
+   395→              "Il existe déjà un répartiteur en amont.",
+   396→              "Un délai de détection (intervalle des sondes) pendant lequel les requêtes échouent quand même.",
+   397→            ),
+   398→          ],
+   399→        ),
+   400→      );
+   401→    }
+   402→    // base primaire sans réplica connecté
+   403→    if (e.rt.role === "database") {
+   404→      const hasReplica = c.input.runtimes.some((r) => r.role === "replica");
+   405→      if (!hasReplica) {
+   406→        out.push(
+   407→          mk(
+   408→            "spof-base",
+   409→            "warning",
+   410→            "Base primaire sans redondance",
+   411→            e.rt.id,
+   412→            e.rt.label,
+   413→            [
+   414→              { label: "Réplicas de lecture", value: "0" },
+   415→              { label: "Politique de réplication", value: e.rt.rc.replicationPolicy },
+   416→            ],
+   417→            "La base de données est la source de vérité et n'a aucun réplica/standby simulé : une panne y est définitive (perte de service, restauration longue).",
+   418→            "Une base primaire unique concentre à la fois le flux d'écritures (non dimensionnable par réplicas) et le risque de disponibilité. Un standby (même asynchrone) permet un failover en minutes ; les sauvegardes PITR bornent la perte de données. À ne pas confondre : un standby de disponibilité n'accélère pas les écritures.",
+   419→            [
+   420→              sol(
+   421→                "Ajouter un standby de failover",
+   422→                "Répliquer la base (streaming asynchrone) vers un nœud standby prêt à être promu.",
+   423→                "Le SLO de disponibilité exige un RTO de l'ordre de la minute.",
+   424→                "Coût d'un nœud complet ; le failover asynchrone peut perdre les dernières transactions (RPO > 0).",
+   425→              ),
+   426→              sol(
+   427→                "Sauvegardes + PITR",
+   428→                "Sauvegardes régulières + WAL archivé pour restaurer à un instant donné.",
+   429→                "Toute architecture, avec ou sans standby.",
+   430→                "RTO en heures ; à tester (une sauvegarde non testée n'existe pas).",
+   431→              ),
+   432→            ],
+   433→          ),
+   434→        );
+   435→      }
+   436→    }
+   437→  }
+   438→  return out.slice(0, 4);
+   439→};
+   440→
+   441→/** R5 — cache inefficace. */
+   442→const ruleCacheHit: Rule = (c) => {
+   443→  const out: Diagnostic[] = [];
+   444→  for (const e of c.byId.values()) {
+   445→    if ((e.rt.role !== "cache" && e.rt.role !== "cdn") || e.nm.arrivals < 20) continue;
+   446→    const hitRate = e.nm.cacheHitRate;
+   447→    if (hitRate === undefined || hitRate >= 0.5) continue;
+   448→    out.push(
+   449→      mk(
+   450→        "cache-hit-faible",
+   451→        "warning",
+   452→        "Cache inefficace (taux de hit faible)",
+   453→        e.rt.id,
+   454→        e.rt.label,
+   455→        [
+   456→          { label: "Taux de hit", value: pct(hitRate) },
+   457→          { label: "Requêtes servies du cache", value: formatNumber(Math.round(e.nm.cacheHits ?? 0)) },
+   458→          { label: "Lectures reçues", value: formatNumber(Math.round(e.ex.readArrivals * (c.input.scale > 0 ? 1 / c.input.scale : 1))) },
+   459→        ],
+   460→        `Seules ${pct(hitRate)} des lectures sont servies par le cache : la majorité du trafic traverse quand même vers l'origine.`,
+   461→        "Un cache n'est rentable que si les lectures se répètent (localité). En dessous de ~50 % de hit, il coûte de la mémoire et de la latence (look-up + transfert vers l'origine) sans décharger l'origine. Les causes typiques : working set trop grand pour la mémoire, TTL trop court, clés trop fines (cardinalité), ou données peu réutilisées par nature.",
+   462→        [
+   463→          sol(
+   464→            "Vérifier le working set",
+   465→            "Comparer la taille des données chaudes à la mémoire allouée ; l'augmenter si les évictions sont fréquentes.",
+   466→            "Les métriques d'éviction montrent des clés chaudes expulsées.",
+   467→            "Coût mémoire : le Go de RAM est le poste le plus cher du cache.",
+   468→          ),
+   469→          sol(
+   470→            "Ajuster TTL et granularité",
+   471→            "Allonger les TTL des données stables et regrouper les clés trop fines (batch) pour augmenter la réutilisation.",
+   472→            "Le hit rate chute juste après chaque expiration.",
+   473→            "TTL long = données plus périmées ; invalider explicitement lors des écritures devient nécessaire.",
+   474→          ),
+   475→          sol(
+   476→            "Retirer le cache si non pertinent",
+   477→            "Si les lectures ne se répètent pas par nature, le cache est un coût inutile : le supprimer simplifie l'architecture.",
+   478→            "Flux de lectures quasi unique (analyses, exports, long tail).",
+   479→            "Supprime une couche de latence et d'incohérence ; l'origine doit tenir le débit complet.",
+   480→          ),
+   481→        ],
+   482→      ),
+   483→    );
+   484→  }
+   485→  return out;
+   486→};
+   487→
+   488→/** R6 — épuisement des connexions. */
+   489→const ruleConnExhausted: Rule = (c) => {
+   490→  const out: Diagnostic[] = [];
+   491→  for (const e of c.byId.values()) {
+   492→    if (e.ex.connExhaustedErrors <= 0) continue;
+   493→    const share = e.nm.arrivals > 0 ? e.ex.connExhaustedErrors / e.nm.arrivals : 0;
+   494→    out.push(
+   495→      mk(
+   496→        "connexions-epuisees",
+   497→        share > 0.02 ? "critical" : "warning",
+   498→        "Connexions à la base épuisées",
+   499→        e.rt.id,
+   500→        e.rt.label,
+   501→        [
+   502→          { label: "Requêtes en erreur d'attente", value: formatNumber(Math.round(e.ex.connExhaustedErrors)) },
+   503→          { label: "Part des arrivées", value: pct(share) },
+   504→          { label: "Connexions max", value: formatNumber(e.rt.rc.maxConnections) },
+   505→          { label: "Attente p95", value: formatMs(e.nm.p95WaitMs) },
+   506→        ],
+   507→        `${formatNumber(Math.round(e.ex.connExhaustedErrors))} requêtes ont attendu plus de 1 s une connexion et ont échoué : le pool (${formatNumber(
+   508→          e.rt.rc.maxConnections,
+   509→        )}) est saturé.`,
+   510→        "Une base n'accepte qu'un nombre fini de connexions simultanées (mémoire + process par connexion). Au-delà, les clients font la file ; côté applicatif, un délai d'attente (pool timeout) transforme l'attente en erreur. Le remède universel est le pooler applicatif : quelques dizaines de connexions bien utilisées suffisent à saturer une base — en ouvrir 10 000 aggrave tout (context switching, verrous).",
+   511→        [
+   512→          sol(
+   513→            "Pool de connexions côté application",
+   514→            "Placer un pooler (type PgBouncer / HikariCP) : il multiplexe des milliers de requêtes clientes sur un pool borné de connexions réelles.",
+   515→            "Le nombre de clients applicatifs × leurs connexions dépasse largement la capacité réelle de la base.",
+   516→            "Un réglage à surveiller (taille du pool, timeout) ; le mode transaction limite les connexions longues (LISTEN, CURSOR).",
+   517→          ),
+   518→          sol(
+   519→            "Réduire le temps par requête",
+   520→            "Requêtes plus courtes = connexions rendues plus vite = débit plus grand à pool égal (agir sur les index et les requêtes N+1).",
+   521→            "Le temps moyen par requête est optimisable.",
+   522→            "Effort de développement et de profilage.",
+   523→          ),
+   524→          sol(
+   525→            "Décharger les lectures",
+   526→            "Cache applicatif en amont : moins de lectures atteignent la base, donc moins de connexions nécessaires.",
+   527→            "Flux dominant en lectures avec réutilisation.",
+   528→            "Taux de hit à vérifier ; incohérences possibles.",
+   529→          ),
+   530→        ],
+   531→      ),
+   532→    );
+   533→  }
+   534→  return out;
+   535→};
+   536→
+   537→/** R7 — cascade de timeouts. */
+   538→const ruleTimeoutCascade: Rule = (c) => {
+   539→  const out: Diagnostic[] = [];
+   540→  for (const e of c.byId.values()) {
+   541→    if (e.rt.role !== "server" || e.ex.downstreamP95Ms <= 0) continue;
+   542→    if (e.ex.downstreamP95Ms <= e.rt.rc.timeoutMs) continue;
+   543→    out.push(
+   544→      mk(
+   545→        "cascade-timeouts",
+   546→        "critical",
+   547→        "Cascade de timeouts",
+   548→        e.rt.id,
+   549→        e.rt.label,
+   550→        [
+   551→          { label: "p95 du sous-arbre aval", value: formatMs(e.ex.downstreamP95Ms) },
+   552→          { label: "Timeout configuré", value: formatMs(e.rt.rc.timeoutMs) },
+   553→          { label: "Timeouts observés", value: formatNumber(Math.round(e.nm.timeouts)) },
+   554→        ],
+   555→        `Le temps de réponse du sous-arbre aval (${formatMs(
+   556→          e.ex.downstreamP95Ms,
+   557→        )} en p95) dépasse le timeout de ce serveur (${formatMs(e.rt.rc.timeoutMs)}) : les requêtes amont abandonnent avant la réponse.`,
+   558→        "Chaque étage d'une chaîne synchrone possède son timeout. Quand le temps réel d'un étage aval dépasse le timeout de l'étage amont, l'amont abandonne — mais l'aval continue à travailler pour rien : la charge reste, la réponse part à la poubelle. C'est la pire des cascades : le système consomme sa capacité pour produire des échecs. La règle d'or : le timeout amont doit englober le p95 aval + une marge, et chaque saut doit avoir un budget de latence explicite.",
+   559→        [
+   560→          sol(
+   561→            "Aligner les budgets de latence",
+   562→            "Remonter le timeout amont au-dessus du p95 aval + marge (règle : timeout_amont > p95 aval × 1,5), ou réduire le p95 aval.",
+   563→            "Le p95 aval est légitime (traitement réel) et l'amont peut attendre plus longtemps.",
+   564→            "Un timeout long retient les ressources amont (slots, connexions) plus longtemps — la saturation se déplace.",
+   565→          ),
+   566→          sol(
+   567→            "Accélérer l'aval",
+   568→            "Cache, capacité supplémentaire ou requêtes optimisées sur le sous-arbre lent — traiter la cause plutôt que le symptôme.",
+   569→            "Le p95 aval est anormalement élevé (saturation, requêtes lentes).",
+   570→            "Coût/effort variable selon le goulot réel identifié.",
+   571→          ),
+   572→          sol(
+   573→            "Découpler en asynchrone",
+   574→            "Répondre immédiatement (202 + file) et livrer le résultat plus tard : le chemin synchrone ne porte plus le traitement long.",
+   575→            "Le client tolère une réponse différée (notification, polling).",
+   576→            "Complexité (files, workers, suivi des échecs) ; cohérence à terme.",
+   577→          ),
+   578→        ],
+   579→      ),
+   580→    );
+   581→  }
+   582→  return out.slice(0, 3);
+   583→};
+   584→
+   585→/** R8 — composant isolé. */
+   586→const ruleIsolated: Rule = (c) => {
+   587→  const out: Diagnostic[] = [];
+   588→  const isolated = new Set(c.input.graph.isolatedNodeIds);
+   589→  for (const rt of c.input.runtimes) {
+   590→    if (!isolated.has(rt.id)) continue;
+   591→    if (rt.category === "observability") continue; // hors périmètre (déconnectée par nature)
+   592→    out.push(
+   593→      mk(
+   594→        "composant-isole",
+   595→        "info",
+   596→        "Composant isolé",
+   597→        rt.id,
+   598→        rt.label,
+   599→        [{ label: "Connexions", value: "0 entrante / 0 sortante" }],
+   600→        `« ${rt.label} » n'est relié à aucun autre composant : il ne reçoit ni n'émet de trafic.`,
+   601→        "Un nœud isolé ne participe ni à la simulation ni à l'architecture réelle. C'est souvent un oubli de câblage (l'utilisateur pensait l'avoir connecté) ou un vestige d'une itération de design. Les composants d'observabilité (monitoring, tracing) sont tolérés : ils écoutent sans perturber le flux.",
+   602→        [
+   603→          sol(
+   604→            "Connecter le composant",
+   605→            "Tracer une arête depuis le composant qui l'alimente (ou vers celui qu'il dessert) pour l'insérer dans le chemin de trafic.",
+   606→            "Le composant doit participer au flux.",
+   607→            "Vérifier le sens du câblage et le protocole de l'arête.",
+
+[showing lines 48-607 of 1078; use offset=608 with limit to continue reading]
