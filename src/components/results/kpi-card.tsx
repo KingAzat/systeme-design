@@ -14,7 +14,9 @@ export type KpiAccent = "default" | "success" | "warning" | "destructive" | "inf
 const ACCENT_TEXT: Record<KpiAccent, string> = {
   default: "text-foreground",
   success: "text-success",
-  warning: "text-warning",
+  // amber-700 (au lieu du token #D97706 ≈ amber-600) : la valeur KPI reste
+  // lisible en mode clair (WCAG AA), amber-400 en sombre.
+  warning: "text-amber-700 dark:text-amber-400",
   destructive: "text-destructive",
   info: "text-info",
 };

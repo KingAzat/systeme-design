@@ -255,7 +255,7 @@ export function LandingView() {
             </span>
             <h1
               suppressHydrationWarning
-              className="text-balance mt-6 text-4xl font-semibold tracking-tight sm:text-5xl"
+              className="text-balance mt-10 text-4xl font-semibold tracking-tight sm:text-5xl"
             >
               Concevez. <span className="text-primary" suppressHydrationWarning>Simulez.</span>{" "}
               Comprenez.
@@ -273,7 +273,12 @@ export function LandingView() {
                 <Play />
                 Ouvrir l&apos;éditeur
               </Button>
-              <Button size="lg" variant="outline" onClick={() => setView("templates")}>
+              <Button
+                size="lg"
+                variant="outline"
+                className="border-foreground/20 hover:border-foreground/35 hover:bg-muted"
+                onClick={() => setView("templates")}
+              >
                 <LayoutGrid />
                 Explorer les modèles
               </Button>
@@ -306,9 +311,9 @@ export function LandingView() {
               <Card key={f.title} className="gap-4 py-5">
                 <CardContent className="px-5">
                   <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <f.icon className="size-5" />
+                    <f.icon className="size-5" aria-hidden />
                   </span>
-                  <p className="mt-4 font-medium">{f.title}</p>
+                  <h3 className="mt-4 font-medium">{f.title}</h3>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                     {f.lines[0]}
                     <br />
@@ -336,7 +341,11 @@ export function LandingView() {
                 votre échelle. Ouvrez-les, cassez-les, réparez-les.
               </p>
             </div>
-            <Button variant="outline" onClick={() => setView("templates")}>
+            <Button
+              variant="outline"
+              className="border-foreground/20 hover:border-foreground/35 hover:bg-muted"
+              onClick={() => setView("templates")}
+            >
               Explorer les modèles
               <ArrowRight />
             </Button>

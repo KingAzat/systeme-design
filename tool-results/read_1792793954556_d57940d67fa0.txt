@@ -1,0 +1,1058 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * SystemLab — Panneau de configuration (droite).
+     5→ * Nœud sélectionné : onglets Configuration / Performance / Apprentissage.
+     6→ * Connexion sélectionnée : protocole, latence, bande passante.
+     7→ * Zone sélectionnée : libellé, couleur, dimensions.
+     8→ */
+     9→import { useEffect, useMemo, useRef, useState } from "react";
+    10→import {
+    11→  Check,
+    12→  CircleHelp,
+    13→  Info,
+    14→  LayoutGrid,
+    15→  Link2,
+    16→  Minus,
+    17→  MousePointerClick,
+    18→  Plus,
+    19→  TriangleAlert,
+    20→  X,
+    21→} from "lucide-react";
+    22→import { cn } from "@/lib/utils";
+    23→import { getCategoryStyle } from "@/lib/icons";
+    24→import {
+    25→  formatCost,
+    26→  formatMs,
+    27→  formatNumber,
+    28→  formatPercent,
+    29→  formatRps,
+    30→} from "@/lib/format";
+    31→import { estimateArchitecture, type NodeEstimate } from "@/engine";
+    32→import { getComponentById } from "@/data/catalog/registry";
+    33→import { useEditorStore } from "@/stores/editor-store";
+    34→import { useSimulationStore } from "@/stores/simulation-store";
+    35→import type {
+    36→  ArchEdge,
+    37→  ArchNode,
+    38→  CatalogField,
+    39→  Protocol,
+    40→  ZoneColor,
+    41→} from "@/types";
+    42→import {
+    43→  Accordion,
+    44→  AccordionContent,
+    45→  AccordionItem,
+    46→  AccordionTrigger,
+    47→} from "@/components/ui/accordion";
+    48→import { Badge } from "@/components/ui/badge";
+    49→import { Button } from "@/components/ui/button";
+    50→import { Input } from "@/components/ui/input";
+    51→import { Label } from "@/components/ui/label";
+    52→import { Progress } from "@/components/ui/progress";
+    53→import {
+    54→  Select,
+    55→  SelectContent,
+    56→  SelectItem,
+    57→  SelectTrigger,
+    58→  SelectValue,
+    59→} from "@/components/ui/select";
+    60→import { Slider } from "@/components/ui/slider";
+    61→import { Switch } from "@/components/ui/switch";
+    62→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    63→import {
+    64→  Tooltip,
+    65→  TooltipContent,
+    66→  TooltipTrigger,
+    67→} from "@/components/ui/tooltip";
+    68→import { CatalogIcon } from "../catalog-icon";
+    69→
+    70→/* ------------------------------------------------------------------ */
+    71→/* Données statiques                                                   */
+    72→/* ------------------------------------------------------------------ */
+    73→
+    74→const PROTOCOL_OPTIONS: { value: Protocol; label: string }[] = [
+    75→  { value: "http", label: "HTTP" },
+    76→  { value: "https", label: "HTTPS" },
+    77→  { value: "tcp", label: "TCP" },
+    78→  { value: "grpc", label: "gRPC" },
+    79→  { value: "websocket", label: "WebSocket" },
+    80→  { value: "amqp", label: "AMQP" },
+    81→  { value: "kafka", label: "Kafka" },
+    82→  { value: "redis", label: "Redis" },
+    83→  { value: "sql", label: "SQL" },
+    84→];
+    85→
+    86→const ZONE_COLOR_OPTIONS: { value: ZoneColor; label: string; dot: string }[] = [
+    87→  { value: "indigo", label: "Indigo", dot: "bg-indigo-400" },
+    88→  { value: "cyan", label: "Cyan", dot: "bg-cyan-400" },
+    89→  { value: "emerald", label: "Émeraude", dot: "bg-emerald-400" },
+    90→  { value: "amber", label: "Ambre", dot: "bg-amber-400" },
+    91→  { value: "violet", label: "Violet", dot: "bg-violet-400" },
+    92→  { value: "rose", label: "Rose", dot: "bg-rose-400" },
+    93→];
+    94→
+    95→function utilizationColor(utilization: number): string {
+    96→  if (utilization >= 0.95) return "bg-destructive";
+    97→  if (utilization >= 0.8) return "bg-warning";
+    98→  return "bg-success";
+    99→}
+   100→
+   101→function roundTo(v: number, digits = 6): number {
+   102→  const factor = 10 ** digits;
+   103→  return Math.round(v * factor) / factor;
+   104→}
+   105→
+   106→/* ------------------------------------------------------------------ */
+   107→/* Champs réutilisables                                                */
+   108→/* ------------------------------------------------------------------ */
+   109→
+   110→function LabelWithHelp({ field }: { field: CatalogField }) {
+   111→  return (
+   112→    <span className="flex items-center gap-1.5">
+   113→      <Label htmlFor={`field-${field.key}`} className="text-xs font-medium">
+   114→        {field.label}
+   115→      </Label>
+   116→      {field.unit && (
+   117→        <span className="text-[10px] text-muted-foreground">{field.unit}</span>
+   118→      )}
+   119→      {field.help && (
+   120→        <Tooltip>
+   121→          <TooltipTrigger asChild>
+   122→            <CircleHelp
+   123→              className="size-3.5 cursor-help text-muted-foreground"
+   124→              aria-label={`Aide : ${field.label}`}
+   125→            />
+   126→          </TooltipTrigger>
+   127→          <TooltipContent side="top" className="max-w-56 text-xs">
+   128→            {field.help}
+   129→          </TooltipContent>
+   130→        </Tooltip>
+   131→      )}
+   132→    </span>
+   133→  );
+   134→}
+   135→
+   136→interface NumberInputProps {
+   137→  id: string;
+   138→  value: number;
+   139→  min?: number;
+   140→  max?: number;
+   141→  step?: number;
+   142→  ariaLabel: string;
+   143→  onCommit: (value: number) => void;
+   144→}
+   145→
+   146→/** Saisie numérique avec ± ; commit sur blur/Entrée (les +/- commitent direct). */
+   147→function NumberInput({ id, value, min, max, step, ariaLabel, onCommit }: NumberInputProps) {
+   148→  const [draft, setDraft] = useState<string>(String(value));
+   149→  useEffect(() => {
+   150→    setDraft(String(value));
+   151→  }, [value]);
+   152→
+   153→  const commit = (raw: string) => {
+   154→    const parsed = Number(raw.replace(",", "."));
+   155→    if (!Number.isFinite(parsed)) {
+   156→      setDraft(String(value));
+   157→      return;
+   158→    }
+   159→    let next = parsed;
+   160→    if (min !== undefined) next = Math.max(min, next);
+   161→    if (max !== undefined) next = Math.min(max, next);
+   162→    onCommit(roundTo(next));
+   163→  };
+   164→
+   165→  const stepBy = (direction: 1 | -1) => {
+   166→    const s = step ?? 1;
+   167→    const current = Number(draft.replace(",", ".")) || 0;
+   168→    let next = roundTo(current + direction * s);
+   169→    if (min !== undefined) next = Math.max(min, next);
+   170→    if (max !== undefined) next = Math.min(max, next);
+   171→    setDraft(String(next));
+   172→    onCommit(next);
+   173→  };
+   174→
+   175→  return (
+   176→    <div className="flex items-center gap-1">
+   177→      <Button
+   178→        type="button"
+   179→        variant="outline"
+   180→        size="icon"
+   181→        className="size-7 shrink-0"
+   182→        aria-label={`Diminuer ${ariaLabel}`}
+   183→        onClick={() => stepBy(-1)}
+   184→      >
+   185→        <Minus className="size-3" />
+   186→      </Button>
+   187→      <Input
+   188→        id={id}
+   189→        type="number"
+   190→        inputMode="decimal"
+   191→        value={draft}
+   192→        min={min}
+   193→        max={max}
+   194→        step={step}
+   195→        aria-label={ariaLabel}
+   196→        onChange={(event) => setDraft(event.target.value)}
+   197→        onBlur={() => commit(draft)}
+   198→        onKeyDown={(event) => {
+   199→          if (event.key === "Enter") commit(draft);
+   200→        }}
+   201→        className="h-8 text-center text-sm tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+   202→      />
+   203→      <Button
+   204→        type="button"
+   205→        variant="outline"
+   206→        size="icon"
+   207→        className="size-7 shrink-0"
+   208→        aria-label={`Augmenter ${ariaLabel}`}
+   209→        onClick={() => stepBy(1)}
+   210→      >
+   211→        <Plus className="size-3" />
+   212→      </Button>
+   213→    </div>
+   214→  );
+   215→}
+   216→
+   217→/* ------------------------------------------------------------------ */
+   218→/* Champ de configuration de nœud                                      */
+   219→/* ------------------------------------------------------------------ */
+   220→
+   221→function ConfigField({ node, field }: { node: ArchNode; field: CatalogField }) {
+   222→  const updateNodeConfig = useEditorStore((s) => s.updateNodeConfig);
+   223→  const value = node.config[field.key];
+   224→  const fieldId = `node-${node.id}-${field.key}`;
+   225→
+   226→  const commit = (next: number | string | boolean) => {
+   227→    useEditorStore.getState().updateNodeConfig(node.id, field.key, next);
+   228→  };
+   229→
+   230→  if (field.type === "boolean") {
+   231→    const checked = Boolean(value);
+   232→    return (
+   233→      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
+   234→        <LabelWithHelp field={field} />
+   235→        <Switch
+   236→          id={fieldId}
+   237→          checked={checked}
+   238→          onCheckedChange={commit}
+   239→          aria-label={field.label}
+   240→        />
+   241→      </div>
+   242→    );
+   243→  }
+   244→
+   245→  if (field.type === "select") {
+   246→    return (
+   247→      <div className="space-y-1.5">
+   248→        <LabelWithHelp field={field} />
+   249→        <Select
+   250→          value={typeof value === "string" ? value : String(value)}
+   251→          onValueChange={(next) => commit(next)}
+   252→        >
+   253→          <SelectTrigger id={fieldId} className="h-8 w-full" aria-label={field.label}>
+   254→            <SelectValue placeholder={field.label} />
+   255→          </SelectTrigger>
+   256→          <SelectContent>
+   257→            {field.options?.map((option) => (
+   258→              <SelectItem key={option.value} value={option.value}>
+   259→                {option.label}
+   260→              </SelectItem>
+   261→            ))}
+   262→          </SelectContent>
+   263→        </Select>
+   264→      </div>
+   265→    );
+   266→  }
+   267→
+   268→  if (field.type === "text") {
+   269→    return (
+   270→      <div className="space-y-1.5">
+   271→        <LabelWithHelp field={field} />
+   272→        <Input
+   273→          id={fieldId}
+   274→          value={typeof value === "string" ? value : String(value ?? "")}
+   275→          onChange={(event) => commit(event.target.value)}
+   276→          aria-label={field.label}
+   277→          className="h-8"
+   278→        />
+   279→      </div>
+   280→    );
+   281→  }
+   282→
+   283→  // type === "number"
+   284→  const numeric = typeof value === "number" ? value : Number(value) || 0;
+   285→  const hasBounds = field.min !== undefined && field.max !== undefined;
+   286→  return (
+   287→    <div className="space-y-1.5">
+   288→      <LabelWithHelp field={field} />
+   289→      <NumberInput
+   290→        id={fieldId}
+   291→        value={numeric}
+   292→        min={field.min}
+   293→        max={field.max}
+   294→        step={field.step}
+   295→        ariaLabel={field.label}
+   296→        onCommit={commit}
+   297→      />
+   298→      {hasBounds && (
+   299→        <div className="flex items-center gap-3 pt-0.5">
+   300→          <Slider
+   301→            min={field.min}
+   302→            max={field.max}
+   303→            step={field.step ?? 1}
+   304→            value={[numeric]}
+   305→            onValueChange={(values) =>
+   306→              useEditorStore
+   307→                .getState()
+   308→                .updateNodeConfig(node.id, field.key, values[0])
+   309→            }
+   310→            onValueCommit={(values) => commit(values[0])}
+   311→            aria-label={field.label}
+   312→            className="flex-1"
+   313→          />
+   314→          <span className="w-14 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+   315→            {formatNumber(numeric)}
+   316→          </span>
+   317→        </div>
+   318→      )}
+   319→    </div>
+   320→  );
+   321→}
+   322→
+   323→function FieldGroupSection({
+   324→  title,
+   325→  fields,
+   326→  node,
+   327→}: {
+   328→  title: string;
+   329→  fields: CatalogField[];
+   330→  node: ArchNode;
+   331→}) {
+   332→  if (fields.length === 0) return null;
+   333→  return (
+   334→    <section className="space-y-3">
+   335→      <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   336→        {title}
+   337→      </h4>
+   338→      <div className="space-y-3">{fields.map((field) => (
+   339→        <ConfigField key={field.key} node={node} field={field} />
+   340→      ))}</div>
+   341→    </section>
+   342→  );
+   343→}
+   344→
+   345→/* ------------------------------------------------------------------ */
+   346→/* Performance : métriques réelles ou estimations                      */
+   347→/* ------------------------------------------------------------------ */
+   348→
+   349→function MetricRow({ label, value }: { label: string; value: string }) {
+   350→  return (
+   351→    <div className="flex items-baseline justify-between gap-2 py-1">
+   352→      <span className="text-xs text-muted-foreground">{label}</span>
+   353→      <span className="text-sm font-medium tabular-nums">{value}</span>
+   354→    </div>
+   355→  );
+   356→}
+   357→
+   358→function UtilizationBar({ utilization }: { utilization: number }) {
+   359→  const clamped = Math.min(1, Math.max(0, utilization));
+   360→  return (
+   361→    <div className="space-y-1.5">
+   362→      <div className="flex items-baseline justify-between gap-2">
+   363→        <span className="text-xs text-muted-foreground">Utilisation</span>
+   364→        <span className="text-sm font-medium tabular-nums">
+   365→          {formatPercent(clamped)}
+   366→        </span>
+   367→      </div>
+   368→      <Progress
+   369→        value={clamped * 100}
+   370→        aria-label="Utilisation"
+   371→        className={cn(
+   372→          "h-2",
+   373→          utilization >= 0.95
+   374→            ? "[&_[data-slot=progress-indicator]]:bg-destructive"
+   375→            : utilization >= 0.8
+   376→              ? "[&_[data-slot=progress-indicator]]:bg-warning"
+   377→              : "[&_[data-slot=progress-indicator]]:bg-success",
+   378→        )}
+   379→      />
+   380→    </div>
+   381→  );
+   382→}
+   383→
+   384→/** Estimations analytiques, débouncées 300 ms et mémoïsées par graphe. */
+   385→function useNodeEstimate(nodeId: string): NodeEstimate | null | "pending" {
+   386→  const graphKey = useEditorStore((s) => JSON.stringify([s.nodes, s.edges, s.scenario]));
+   387→  const cache = useRef(new Map<string, NodeEstimate[]>());
+   388→  const [state, setState] = useState<{ estimate: NodeEstimate | null; ready: boolean }>({
+   389→    estimate: null,
+   390→    ready: false,
+   391→  });
+   392→
+   393→  useEffect(() => {
+   394→    const timer = window.setTimeout(() => {
+   395→      const cached = cache.current.get(graphKey);
+   396→      if (cached) {
+   397→        setState({ estimate: cached.find((e) => e.nodeId === nodeId) ?? null, ready: true });
+   398→        return;
+   399→      }
+   400→      const doc = useEditorStore.getState();
+   401→      const computed = estimateArchitecture({
+   402→        name: doc.name,
+   403→        nodes: doc.nodes,
+   404→        edges: doc.edges,
+   405→        zones: doc.zones,
+   406→        scenario: doc.scenario,
+   407→      });
+   408→      if (cache.current.size > 24) cache.current.clear();
+   409→      cache.current.set(graphKey, computed);
+   410→      setState({ estimate: computed.find((e) => e.nodeId === nodeId) ?? null, ready: true });
+   411→    }, 300);
+   412→    return () => window.clearTimeout(timer);
+   413→  }, [graphKey, nodeId]);
+   414→
+   415→  return state.ready ? state.estimate : "pending";
+   416→}
+   417→
+   418→function RealMetricsContent({ nodeId }: { nodeId: string }) {
+   419→  const metrics = useSimulationStore((s) =>
+   420→    s.result?.nodes.find((m) => m.nodeId === nodeId) ?? null,
+   421→  );
+   422→  if (!metrics) return null;
+   423→  return (
+   424→    <div className="space-y-4">
+   425→      <div className="flex items-center gap-2">
+   426→        <Badge className="border-transparent bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
+   427→          Résultats de simulation
+   428→        </Badge>
+   429→      </div>
+   430→      <div className="divide-y divide-border">
+   431→        <MetricRow label="Débit traité" value={formatRps(metrics.throughputRps)} />
+   432→        <div className="py-1">
+   433→          <UtilizationBar utilization={metrics.utilization} />
+   434→        </div>
+   435→        <MetricRow label="Attente moyenne" value={formatMs(metrics.avgWaitMs)} />
+   436→        <MetricRow label="Taux d'erreur" value={formatPercent(metrics.errorRate)} />
+   437→        <MetricRow label="File d'attente moyenne" value={formatNumber(metrics.avgQueueLength)} />
+   438→        {metrics.cacheHitRate !== undefined && (
+   439→          <MetricRow label="Taux de cache hit" value={formatPercent(metrics.cacheHitRate)} />
+   440→        )}
+   441→        <MetricRow label="Disponibilité" value={formatPercent(metrics.availability)} />
+   442→        <MetricRow label="Coût estimé" value={formatCost(metrics.costPerMonthUsd)} />
+   443→      </div>
+   444→    </div>
+   445→  );
+   446→}
+   447→
+   448→function EstimateContent({ nodeId }: { nodeId: string }) {
+   449→  const estimate = useNodeEstimate(nodeId);
+   450→
+   451→  if (estimate === "pending") {
+   452→    return (
+   453→      <p className="text-xs text-muted-foreground">Calcul des estimations…</p>
+   454→    );
+   455→  }
+   456→  if (!estimate) {
+   457→    return (
+   458→      <p className="text-xs text-muted-foreground">
+   459→        Pas d'estimation pour ce composant (visuel, hors moteur de simulation).
+   460→      </p>
+   461→    );
+   462→  }
+   463→  return (
+   464→    <div className="space-y-4">
+   465→      <div className="flex items-center gap-2">
+   466→        <Badge className="border-transparent bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300">
+   467→          <Info className="size-3" />
+   468→          Estimations initiales
+   469→        </Badge>
+   470→      </div>
+   471→      <div className="divide-y divide-border">
+   472→        <MetricRow label="Capacité théorique" value={formatRps(estimate.capacityRps)} />
+   473→        <MetricRow label="Débit offert estimé" value={formatRps(estimate.offeredRps)} />
+   474→        <div className="py-1">
+   475→          <UtilizationBar utilization={estimate.utilization} />
+   476→        </div>
+   477→        <MetricRow label="Latence locale estimée" value={formatMs(estimate.estLatencyMs)} />
+   478→      </div>
+   479→      {estimate.warnings.length > 0 && (
+   480→        <ul className="space-y-1.5">
+   481→          {estimate.warnings.map((warning) => (
+   482→            <li
+   483→              key={warning}
+   484→              className="flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+   485→            >
+   486→              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+   487→              {warning}
+   488→            </li>
+   489→          ))}
+   490→        </ul>
+   491→      )}
+   492→      <p className="text-[11px] leading-relaxed text-muted-foreground">
+   493→        Ces valeurs sont des estimations analytiques, pas des résultats de
+   494→        simulation. Lancez la simulation pour obtenir des métriques complètes.
+   495→      </p>
+   496→    </div>
+   497→  );
+   498→}
+   499→
+   500→function PerformanceTab({ nodeId }: { nodeId: string }) {
+   501→  const status = useSimulationStore((s) => s.status);
+   502→  const hasMetrics = useSimulationStore((s) =>
+   503→    Boolean(s.result?.nodes.some((m) => m.nodeId === nodeId)),
+   504→  );
+   505→  if (status === "done" && hasMetrics) {
+   506→    return <RealMetricsContent nodeId={nodeId} />;
+   507→  }
+   508→  return <EstimateContent nodeId={nodeId} />;
+   509→}
+   510→
+   511→/* ------------------------------------------------------------------ */
+   512→/* Onglet Apprentissage                                                */
+   513→/* ------------------------------------------------------------------ */
+   514→
+   515→function LearningTab({ node }: { node: ArchNode }) {
+   516→  const liveNode = useEditorStore(
+   517→    (s) => s.nodes.find((n) => n.id === node.id) ?? node,
+   518→  );
+   519→  const learning = learningOf(liveNode);
+   520→
+   521→  if (!learning) {
+   522→    return <p className="text-xs text-muted-foreground">Contenu indisponible.</p>;
+   523→  }
+   524→
+   525→  return (
+   526→    <div className="space-y-5">
+   527→      <section className="space-y-1.5">
+   528→        <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   529→          Rôle
+   530→        </h4>
+   531→        <p className="text-sm leading-relaxed">{learning.role}</p>
+   532→      </section>
+   533→
+   534→      <section className="space-y-1.5">
+   535→        <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   536→          Fonctionnement
+   537→        </h4>
+   538→        <p className="text-sm leading-relaxed">{learning.howItWorks}</p>
+   539→      </section>
+   540→
+   541→      {learning.pros.length > 0 && (
+   542→        <section className="space-y-1.5">
+   543→          <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   544→            Avantages
+   545→          </h4>
+   546→          <ul className="space-y-1">
+   547→            {learning.pros.map((pro) => (
+   548→              <li key={pro} className="flex items-start gap-2 text-sm">
+   549→                <Check className="mt-0.5 size-3.5 shrink-0 text-success" />
+   550→                {pro}
+   551→              </li>
+   552→            ))}
+   553→          </ul>
+   554→        </section>
+   555→      )}
+   556→
+   557→      {learning.cons.length > 0 && (
+   558→        <section className="space-y-1.5">
+   559→          <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   560→            Inconvénients
+   561→          </h4>
+   562→          <ul className="space-y-1">
+   563→            {learning.cons.map((con) => (
+   564→              <li key={con} className="flex items-start gap-2 text-sm">
+   565→                <Minus className="mt-0.5 size-3.5 shrink-0 text-destructive/70" />
+   566→                {con}
+   567→              </li>
+   568→            ))}
+   569→          </ul>
+   570→        </section>
+   571→      )}
+   572→
+   573→      {learning.useCases.length > 0 && (
+   574→        <section className="space-y-1.5">
+   575→          <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   576→            Cas d&apos;utilisation
+   577→          </h4>
+   578→          <div className="flex flex-wrap gap-1.5">
+   579→            {learning.useCases.map((useCase) => (
+   580→              <Badge key={useCase} variant="secondary" className="text-[11px]">
+   581→                {useCase}
+   582→              </Badge>
+   583→            ))}
+   584→          </div>
+   585→        </section>
+   586→      )}
+   587→
+   588→      {learning.pitfalls.length > 0 && (
+   589→        <section className="space-y-1.5">
+   590→          <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   591→            Erreurs fréquentes
+   592→          </h4>
+   593→          <ul className="space-y-1.5">
+   594→            {learning.pitfalls.map((pitfall) => (
+   595→              <li
+   596→                key={pitfall}
+   597→                className="flex items-start gap-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+   598→              >
+   599→                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+   600→                {pitfall}
+   601→              </li>
+   602→            ))}
+   603→          </ul>
+   604→        </section>
+   605→      )}
+   606→
+   607→      {learning.concepts.length > 0 && (
+   608→        <section className="space-y-1.5">
+   609→          <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   610→            Concepts associés
+   611→          </h4>
+   612→          <div className="flex flex-wrap gap-1.5">
+   613→            {learning.concepts.map((concept) => (
+   614→              <Badge key={concept} variant="outline" className="text-[11px]">
+   615→                {concept}
+   616→              </Badge>
+   617→            ))}
+   618→          </div>
+   619→        </section>
+   620→      )}
+   621→    </div>
+   622→  );
+   623→}
+   624→
+   625→/* ------------------------------------------------------------------ */
+   626→/* Panneau nœud                                                        */
+   627→/* ------------------------------------------------------------------ */
+   628→
+   629→/** Résolution du document pédagogique via le catalogue. */
+   630→function learningOf(node: ArchNode) {
+   631→  return getComponentById(node.componentId)?.learning ?? null;
+   632→}
+   633→
+   634→function NodePanelHeader({ node }: { node: ArchNode }) {
+   635→  const component = getComponentById(node.componentId);
+   636→  const style = getCategoryStyle(component?.category ?? "");
+   637→  const metrics = useSimulationStore((s) =>
+   638→    s.status === "done" ? s.result?.nodes.find((m) => m.nodeId === node.id) : undefined,
+   639→  );
+   640→  const healthy =
+   641→    metrics !== undefined &&
+   642→    metrics.utilization < 0.8 &&
+   643→    metrics.errorRate <= 0.05;
+   644→
+   645→  return (
+   646→    <div className="flex items-start gap-2.5">
+   647→      <span
+   648→        className={cn(
+   649→          "flex size-9 shrink-0 items-center justify-center rounded-md",
+   650→          style.icon,
+   651→        )}
+   652→      >
+   653→        <CatalogIcon name={component?.icon} className="size-4" />
+   654→      </span>
+   655→      <div className="min-w-0 flex-1">
+   656→        <p className="truncate text-sm font-semibold">{node.label}</p>
+   657→        <div className="mt-1 flex flex-wrap items-center gap-1">
+   658→          {healthy && (
+   659→            <Badge className="border-transparent bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
+   660→              Healthy
+   661→            </Badge>
+   662→          )}
+   663→          {component && (
+   664→            <Badge variant="secondary" className="text-[10px]">
+   665→              {component.maturity === "simulated"
+   666→                ? "Simulé"
+   667→                : component.maturity === "partial"
+   668→                  ? "Partiel"
+   669→                  : "Visuel"}
+   670→            </Badge>
+   671→          )}
+   672→        </div>
+   673→      </div>
+   674→    </div>
+   675→  );
+   676→}
+   677→
+   678→function NodeConfigPanel({ node }: { node: ArchNode }) {
+   679→  const renameNode = useEditorStore((s) => s.renameNode);
+   680→  const resetNodeConfig = useEditorStore((s) => s.resetNodeConfig);
+   681→  const configTab = useEditorStore((s) => s.configTab);
+   682→  const setConfigTab = useEditorStore((s) => s.setConfigTab);
+   683→  const component = getComponentById(node.componentId);
+   684→
+   685→  const groups = useMemo(
+   686→    () => ({
+   687→      general: component?.fields.filter((f) => f.group === "general") ?? [],
+   688→      capacity: component?.fields.filter((f) => f.group === "capacity") ?? [],
+   689→      advanced: component?.fields.filter((f) => f.group === "advanced") ?? [],
+   690→    }),
+   691→    [component],
+   692→  );
+   693→
+   694→  return (
+   695→    <Tabs
+   696→      value={configTab}
+   697→      onValueChange={(value) => setConfigTab(value as typeof configTab)}
+   698→      className="flex min-h-0 flex-1 flex-col gap-3"
+   699→    >
+   700→      <TabsList className="grid w-full grid-cols-3">
+   701→        <TabsTrigger value="configuration" className="text-xs">
+   702→          Configuration
+   703→        </TabsTrigger>
+   704→        <TabsTrigger value="performance" className="text-xs">
+   705→          Performance
+   706→        </TabsTrigger>
+   707→        <TabsTrigger value="learning" className="text-xs">
+   708→          Apprentissage
+   709→        </TabsTrigger>
+   710→      </TabsList>
+   711→
+   712→      <TabsContent value="configuration" className="min-h-0 flex-1 overflow-y-auto">
+   713→        <div className="space-y-4">
+   714→          <div className="space-y-1.5">
+   715→            <Label htmlFor={`node-name-${node.id}`} className="text-xs font-medium">
+   716→              Nom
+   717→            </Label>
+   718→            <Input
+   719→              id={`node-name-${node.id}`}
+   720→              value={node.label}
+   721→              onChange={(event) => renameNode(node.id, event.target.value)}
+   722→              onBlur={(event) => {
+   723→                const trimmed = event.target.value.trim();
+   724→                if (!trimmed || trimmed !== event.target.value) {
+   725→                  renameNode(node.id, trimmed || (component?.name ?? node.label));
+   726→                }
+   727→              }}
+   728→              aria-label="Nom du composant"
+   729→              className="h-8"
+   730→            />
+   731→          </div>
+   732→          <div className="space-y-1.5">
+   733→            <Label htmlFor={`node-type-${node.id}`} className="text-xs font-medium">
+   734→              Type
+   735→            </Label>
+   736→            <Input
+   737→              id={`node-type-${node.id}`}
+   738→              readOnly
+   739→              value={component?.name ?? node.componentId}
+   740→              aria-label="Type de composant (non modifiable)"
+   741→              className="h-8 cursor-default text-muted-foreground"
+   742→            />
+   743→          </div>
+   744→
+   745→          <FieldGroupSection title="Informations générales" fields={groups.general} node={node} />
+   746→          <FieldGroupSection
+   747→            title="Capacité et performances"
+   748→            fields={groups.capacity}
+   749→            node={node}
+   750→          />
+   751→
+   752→          {groups.advanced.length > 0 && (
+   753→            <Accordion type="single" defaultValue="advanced" className="border-t border-border">
+   754→              <AccordionItem value="advanced" className="border-b-0">
+   755→                <AccordionTrigger className="py-3 text-xs hover:no-underline">
+   756→                  Configuration avancée
+   757→                </AccordionTrigger>
+   758→                <AccordionContent className="space-y-3">
+   759→                  {groups.advanced.map((field) => (
+   760→                    <ConfigField key={field.key} node={node} field={field} />
+   761→                  ))}
+   762→                </AccordionContent>
+   763→              </AccordionItem>
+   764→            </Accordion>
+   765→          )}
+   766→
+   767→          <Button
+   768→            type="button"
+   769→            variant="secondary"
+   770→            className="w-full bg-accent text-accent-foreground hover:bg-accent/80"
+   771→            onClick={() => resetNodeConfig(node.id)}
+   772→          >
+   773→            Réinitialiser les paramètres
+   774→          </Button>
+   775→        </div>
+   776→      </TabsContent>
+   777→
+   778→      <TabsContent value="performance" className="min-h-0 flex-1 overflow-y-auto">
+   779→        <PerformanceTab nodeId={node.id} />
+   780→      </TabsContent>
+   781→
+   782→      <TabsContent value="learning" className="min-h-0 flex-1 overflow-y-auto">
+   783→        <LearningTab node={node} />
+   784→      </TabsContent>
+   785→    </Tabs>
+   786→  );
+   787→}
+   788→
+   789→/* ------------------------------------------------------------------ */
+   790→/* Panneau connexion                                                   */
+   791→/* ------------------------------------------------------------------ */
+   792→
+   793→function EdgePanel({ edge, nodes }: { edge: ArchEdge; nodes: ArchNode[] }) {
+   794→  const updateEdge = useEditorStore((s) => s.updateEdge);
+   795→  const deleteEdge = useEditorStore((s) => s.deleteEdge);
+   796→  const source = nodes.find((n) => n.id === edge.source);
+   797→  const target = nodes.find((n) => n.id === edge.target);
+   798→
+   799→  return (
+   800→    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+   801→      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   802→        <MousePointerClick className="size-3.5" />
+   803→        {source?.label ?? edge.source}
+   804→        <span aria-hidden>→</span>
+   805→        {target?.label ?? edge.target}
+   806→      </p>
+   807→
+   808→      <div className="space-y-1.5">
+   809→        <Label htmlFor={`edge-protocol-${edge.id}`} className="text-xs font-medium">
+   810→          Protocole
+   811→        </Label>
+   812→        <Select
+   813→          value={edge.protocol}
+   814→          onValueChange={(value) => updateEdge(edge.id, { protocol: value as Protocol })}
+   815→        >
+   816→          <SelectTrigger id={`edge-protocol-${edge.id}`} className="h-8 w-full">
+   817→            <SelectValue />
+   818→          </SelectTrigger>
+   819→          <SelectContent>
+   820→            {PROTOCOL_OPTIONS.map((option) => (
+   821→              <SelectItem key={option.value} value={option.value}>
+   822→                {option.label}
+   823→              </SelectItem>
+   824→            ))}
+   825→          </SelectContent>
+   826→        </Select>
+   827→      </div>
+   828→
+   829→      <div className="space-y-1.5">
+   830→        <Label htmlFor={`edge-latency-${edge.id}`} className="text-xs font-medium">
+   831→          Latence réseau <span className="text-[10px] text-muted-foreground">ms</span>
+   832→        </Label>
+   833→        <NumberInput
+   834→          id={`edge-latency-${edge.id}`}
+   835→          value={edge.networkLatencyMs}
+   836→          min={0}
+   837→          step={1}
+   838→          ariaLabel="Latence réseau de la connexion"
+   839→          onCommit={(value) => updateEdge(edge.id, { networkLatencyMs: value })}
+   840→        />
+   841→      </div>
+   842→
+   843→      <div className="space-y-1.5">
+   844→        <Label htmlFor={`edge-bandwidth-${edge.id}`} className="text-xs font-medium">
+   845→          Bande passante <span className="text-[10px] text-muted-foreground">Mbps</span>
+   846→        </Label>
+   847→        <NumberInput
+   848→          id={`edge-bandwidth-${edge.id}`}
+   849→          value={edge.bandwidthMbps}
+   850→          min={1}
+   851→          step={10}
+   852→          ariaLabel="Bande passante de la connexion"
+   853→          onCommit={(value) => updateEdge(edge.id, { bandwidthMbps: value })}
+   854→        />
+   855→      </div>
+   856→
+   857→      <Button
+   858→        type="button"
+   859→        variant="outline"
+   860→        className="w-full text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+   861→        onClick={() => deleteEdge(edge.id)}
+   862→      >
+   863→        Supprimer la connexion
+   864→      </Button>
+   865→    </div>
+   866→  );
+   867→}
+   868→
+   869→/* ------------------------------------------------------------------ */
+   870→/* Panneau zone                                                        */
+   871→/* ------------------------------------------------------------------ */
+   872→
+   873→function ZonePanel({ zoneId }: { zoneId: string }) {
+   874→  const zones = useEditorStore((s) => s.zones);
+   875→  const updateZone = useEditorStore((s) => s.updateZone);
+   876→  const deleteZone = useEditorStore((s) => s.deleteZone);
+   877→  const zone = zones.find((z) => z.id === zoneId);
+   878→  if (!zone) return null;
+   879→
+   880→  return (
+   881→    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+   882→      <div className="space-y-1.5">
+   883→        <Label htmlFor={`zone-label-${zone.id}`} className="text-xs font-medium">
+   884→          Libellé
+   885→        </Label>
+   886→        <Input
+   887→          id={`zone-label-${zone.id}`}
+   888→          value={zone.label}
+   889→          onChange={(event) => updateZone(zone.id, { label: event.target.value.slice(0, 60) })}
+   890→          aria-label="Libellé de la zone"
+   891→          className="h-8"
+   892→        />
+   893→      </div>
+   894→
+   895→      <div className="space-y-1.5">
+   896→        <Label htmlFor={`zone-color-${zone.id}`} className="text-xs font-medium">
+   897→          Couleur
+   898→        </Label>
+   899→        <Select
+   900→          value={zone.color}
+   901→          onValueChange={(value) => updateZone(zone.id, { color: value as ZoneColor })}
+   902→        >
+   903→          <SelectTrigger id={`zone-color-${zone.id}`} className="h-8 w-full">
+   904→            <SelectValue />
+   905→          </SelectTrigger>
+   906→          <SelectContent>
+   907→            {ZONE_COLOR_OPTIONS.map((option) => (
+   908→              <SelectItem key={option.value} value={option.value}>
+   909→                <span className="flex items-center gap-2">
+   910→                  <span className={cn("size-2.5 rounded-full", option.dot)} />
+   911→                  {option.label}
+   912→                </span>
+   913→              </SelectItem>
+   914→            ))}
+   915→          </SelectContent>
+   916→        </Select>
+   917→      </div>
+   918→
+   919→      <div className="grid grid-cols-2 gap-3">
+   920→        <div className="space-y-1.5">
+   921→          <Label htmlFor={`zone-width-${zone.id}`} className="text-xs font-medium">
+   922→            Largeur <span className="text-[10px] text-muted-foreground">px</span>
+   923→          </Label>
+   924→          <NumberInput
+   925→            id={`zone-width-${zone.id}`}
+   926→            value={zone.size.width}
+   927→            min={160}
+   928→            step={20}
+   929→            ariaLabel="Largeur de la zone"
+   930→            onCommit={(value) =>
+   931→              updateZone(zone.id, { size: { ...zone.size, width: value } })
+   932→            }
+   933→          />
+   934→        </div>
+   935→        <div className="space-y-1.5">
+   936→          <Label htmlFor={`zone-height-${zone.id}`} className="text-xs font-medium">
+   937→            Hauteur <span className="text-[10px] text-muted-foreground">px</span>
+   938→          </Label>
+   939→          <NumberInput
+   940→            id={`zone-height-${zone.id}`}
+   941→            value={zone.size.height}
+   942→            min={120}
+   943→            step={20}
+   944→            ariaLabel="Hauteur de la zone"
+   945→            onCommit={(value) =>
+   946→              updateZone(zone.id, { size: { ...zone.size, height: value } })
+   947→            }
+   948→          />
+   949→        </div>
+   950→      </div>
+   951→
+   952→      <Button
+   953→        type="button"
+   954→        variant="outline"
+   955→        className="w-full text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+   956→        onClick={() => deleteZone(zone.id)}
+   957→      >
+   958→        Supprimer la zone
+   959→      </Button>
+   960→    </div>
+   961→  );
+   962→}
+   963→
+   964→/* ------------------------------------------------------------------ */
+   965→/* Panneau racine                                                      */
+   966→/* ------------------------------------------------------------------ */
+   967→
+   968→export interface ConfigPanelProps {
+   969→  className?: string;
+   970→  /** Appelé en plus du store à la fermeture (Sheet mobile). */
+   971→  onCloseExtra?: () => void;
+   972→}
+   973→
+   974→export function ConfigPanel({ className, onCloseExtra }: ConfigPanelProps) {
+   975→  const selectedNodeId = useEditorStore((s) => s.selectedNodeId);
+   976→  const selectedEdgeId = useEditorStore((s) => s.selectedEdgeId);
+   977→  const selectedZoneId = useEditorStore((s) => s.selectedZoneId);
+   978→  const nodes = useEditorStore((s) => s.nodes);
+   979→  const edges = useEditorStore((s) => s.edges);
+   980→  const setConfigOpen = useEditorStore((s) => s.setConfigOpen);
+   981→
+   982→  const selectedNode = selectedNodeId
+   983→    ? nodes.find((n) => n.id === selectedNodeId) ?? null
+   984→    : null;
+   985→  const selectedEdge = selectedEdgeId
+   986→    ? edges.find((e) => e.id === selectedEdgeId) ?? null
+   987→    : null;
+   988→
+   989→  const close = () => {
+   990→    setConfigOpen(false);
+   991→    onCloseExtra?.();
+   992→  };
+   993→
+   994→  return (
+   995→    <aside
+   996→      className={cn(
+   997→        "flex w-80 shrink-0 flex-col border-l border-border bg-card",
+   998→        className,
+   999→      )}
+  1000→      aria-label="Panneau de configuration"
+  1001→    >
+  1002→      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+  1003→        <div className="flex min-w-0 items-center gap-2">
+  1004→          {selectedEdge ? (
+  1005→            <Link2 className="size-4 shrink-0 text-muted-foreground" />
+  1006→          ) : selectedZoneId ? (
+  1007→            <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
+  1008→          ) : null}
+  1009→          <h2 className="truncate text-sm font-semibold">
+  1010→            {selectedNode
+  1011→              ? "Composant"
+  1012→              : selectedEdge
+  1013→                ? "Connexion"
+  1014→                : selectedZoneId
+  1015→                  ? "Zone"
+  1016→                  : "Configuration"}
+  1017→          </h2>
+  1018→        </div>
+  1019→        <Button
+  1020→          variant="ghost"
+  1021→          size="icon"
+  1022→          className="size-7 shrink-0"
+  1023→          aria-label="Fermer le panneau de configuration"
+  1024→          onClick={close}
+  1025→        >
+  1026→          <X className="size-4" />
+  1027→        </Button>
+  1028→      </div>
+  1029→
+  1030→      <div className="flex min-h-0 flex-1 flex-col p-3">
+  1031→        {selectedNode ? (
+  1032→          <>
+  1033→            <div className="shrink-0 pb-3">
+  1034→              <NodePanelHeader node={selectedNode} />
+  1035→            </div>
+  1036→            <NodeConfigPanel node={selectedNode} />
+  1037→          </>
+  1038→        ) : selectedEdge ? (
+  1039→          <EdgePanel edge={selectedEdge} nodes={nodes} />
+  1040→        ) : selectedZoneId ? (
+  1041→          <ZonePanel zoneId={selectedZoneId} />
+  1042→        ) : (
+  1043→          <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+  1044→            <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+  1045→              <MousePointerClick className="size-4" />
+  1046→            </span>
+  1047→            <p className="text-sm font-medium">Aucune sélection</p>
+  1048→            <p className="text-xs text-muted-foreground">
+  1049→              Cliquez sur un composant du canvas pour configurer ses paramètres,
+  1050→              ses performances et consulter sa fiche d&apos;apprentissage.
+  1051→            </p>
+  1052→          </div>
+  1053→        )}
+  1054→      </div>
+  1055→    </aside>
+  1056→  );
+  1057→}
+  1058→

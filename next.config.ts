@@ -7,7 +7,10 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["*.space-z.ai"],
   /* config options here */
   typescript: {
-    ignoreBuildErrors: true,
+    /* Vérification TypeScript réactivée : src/ est propre (0 erreur).
+       Les erreurs résiduelles examples/ et skills/ sont hors compilation
+       Next (dossiers non importés par l'application). */
+    ignoreBuildErrors: false,
   },
   reactStrictMode: false,
 };

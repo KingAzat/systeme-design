@@ -6,9 +6,14 @@
  * fléchés. Clic sur un nœud → sélection partagée avec le tableau de métriques.
  */
 import { useId, useMemo } from "react";
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import type { ArchEdge, ArchNode, SimulationResult, ZoneColor } from "@/types";
 import { formatPercent } from "@/lib/format";
+import {
+  ERROR_RATE_CRITICAL,
+  UTILIZATION_CRITICAL,
+  UTILIZATION_WARN,
+} from "@/lib/thresholds";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -44,10 +49,10 @@ const ZONE_CLASSES: Record<ZoneColor, { rect: string; text: string }> = {
   },
 };
 
-/** Teinte du badge d'utilisation (utilisation max du nœud). */
+/** Teinte du badge d'utilisation (utilisation max du nœud, seuils unifiés). */
 function utilTone(u: number): { pill: string; text: string } {
-  if (u >= 0.85) return { pill: "fill-destructive/15", text: "fill-destructive" };
-  if (u >= 0.6) return { pill: "fill-warning/15", text: "fill-warning" };
+  if (u >= UTILIZATION_CRITICAL) return { pill: "fill-destructive/15", text: "fill-destructive" };
+  if (u >= UTILIZATION_WARN) return { pill: "fill-warning/15", text: "fill-warning" };
   return { pill: "fill-success/15", text: "fill-success" };
 }
 
@@ -137,7 +142,7 @@ export function LoadMap({ result, selectedNodeId, onSelectNode }: LoadMapProps) 
   const failingNode = (nodeId: string): boolean => {
     const m = metricsById.get(nodeId);
     if (!m) return false;
-    if (m.errorRate > 0.05) return true;
+    if (m.errorRate > ERROR_RATE_CRITICAL) return true;
     return scenario.failure !== null && scenario.failure.nodeId === nodeId && m.availability < 1;
   };
 
@@ -154,7 +159,8 @@ export function LoadMap({ result, selectedNodeId, onSelectNode }: LoadMapProps) 
         <CardTitle className="text-base font-semibold">Carte de charge</CardTitle>
         <CardDescription>
           Snapshot de l&apos;architecture simulée — la couleur indique l&apos;utilisation maximale
-          de chaque nœud. Cliquez sur un nœud pour le repérer dans le tableau.
+          de chaque nœud. Cliquez sur un nœud (ou Tab + Entrée au clavier) pour le repérer
+          dans le tableau.
         </CardDescription>
       </CardHeader>
       <CardContent className="px-4">
@@ -163,8 +169,8 @@ export function LoadMap({ result, selectedNodeId, onSelectNode }: LoadMapProps) 
           className="h-auto max-h-[560px] w-full select-none"
           preserveAspectRatio="xMidYMid meet"
           onClick={() => onSelectNode(null)}
-          role="img"
-          aria-label="Carte de charge de l'architecture simulée"
+          role="group"
+          aria-label="Carte de charge de l'architecture simulée — chaque nœud est sélectionnable"
         >
           <defs>
             <marker
@@ -176,7 +182,7 @@ export function LoadMap({ result, selectedNodeId, onSelectNode }: LoadMapProps) 
               markerHeight="6"
               orient="auto-start-reverse"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+              <path d="M 0 0 L 10 5 L 0 10 z" className="fill-muted-foreground" />
             </marker>
           </defs>
 
@@ -238,12 +244,28 @@ export function LoadMap({ result, selectedNodeId, onSelectNode }: LoadMapProps) 
               event.stopPropagation();
               onSelectNode(selected ? null : node.id);
             };
+            // Accessibilité clavier : chaque nœud est un bouton focusable —
+            // Entrée/Espace déclenchent la même sélection que le clic.
+            const handleNodeKeyDown = (event: KeyboardEvent<SVGGElement>) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onSelectNode(selected ? null : node.id);
+              }
+            };
             return (
               <g
                 key={node.id}
                 transform={`translate(${node.position.x}, ${node.position.y})`}
-                className="cursor-pointer"
+                className="sl-svg-focus cursor-pointer"
+                tabIndex={0}
+                role="button"
+                aria-label={`${node.label} — utilisation max ${formatPercent(util, 0)}${
+                  failing ? " — en erreur" : ""
+                }`}
+                aria-pressed={selected}
                 onClick={handleSelect}
+                onKeyDown={handleNodeKeyDown}
               >
                 {selected ? (
                   <rect
@@ -298,19 +320,19 @@ export function LoadMap({ result, selectedNodeId, onSelectNode }: LoadMapProps) 
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-sm bg-success" />
-            util. max &lt; 60 %
+            util. max &lt; {Math.round(UTILIZATION_WARN * 100)} %
           </span>
           <span className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-sm bg-warning" />
-            60–85 %
+            {Math.round(UTILIZATION_WARN * 100)}–{Math.round(UTILIZATION_CRITICAL * 100)} %
           </span>
           <span className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-sm bg-destructive" />
-            ≥ 85 %
+            ≥ {Math.round(UTILIZATION_CRITICAL * 100)} %
           </span>
           <span className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-sm border-2 border-destructive" />
-            erreurs &gt; 5 % ou panne simulée
+            erreurs &gt; {Math.round(ERROR_RATE_CRITICAL * 100)} % ou panne simulée
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-0 w-4 border-t-2 border-dashed border-muted-foreground/60" />

@@ -58,6 +58,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     await db.simulationRecord.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e) {
+    if ((e as { code?: string })?.code === "P2025") {
+      return NextResponse.json({ error: "Simulation introuvable" }, { status: 404 });
+    }
     console.error("DELETE /api/simulations/:id", e);
     return NextResponse.json({ error: "Erreur de suppression" }, { status: 500 });
   }

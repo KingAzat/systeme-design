@@ -21,11 +21,13 @@ export async function GET(_req: NextRequest, { params }: Params) {
     } catch {
       return NextResponse.json({ error: "Données d'architecture corrompues" }, { status: 500 });
     }
+    // Les colonnes SQL (name/description) sont la source de vérité : le spread du
+    // JSON doit venir EN PREMIER pour ne pas écraser les valeurs à jour des colonnes.
     const item: Architecture = {
+      ...(data as Omit<Architecture, "id" | "name" | "description" | "createdAt" | "updatedAt">),
       id: row.id,
       name: row.name,
       description: row.description ?? undefined,
-      ...(data as Omit<Architecture, "id" | "name" | "description" | "createdAt" | "updatedAt">),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -40,6 +42,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
 export async function PATCH(req: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
+    const declaredLength = Number(req.headers.get("content-length") ?? 0);
+    if (declaredLength > 3_000_000) {
+      return NextResponse.json({ error: "Corps de requête trop volumineux" }, { status: 413 });
+    }
     const body = await req.json();
     const parsed = updateArchitectureSchema.safeParse(body);
     if (!parsed.success) {
@@ -65,6 +71,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         );
       }
       patch.data = JSON.stringify(graph.data);
+      patch.nodeCount = graph.data.nodes.length;
     }
     const updated = await db.architecture.update({ where: { id }, data: patch });
     return NextResponse.json({
@@ -77,6 +84,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       },
     });
   } catch (e) {
+    if ((e as { code?: string })?.code === "P2025") {
+      return NextResponse.json({ error: "Architecture introuvable" }, { status: 404 });
+    }
     console.error("PATCH /api/architectures/:id", e);
     return NextResponse.json({ error: "Erreur de mise à jour" }, { status: 500 });
   }
@@ -93,6 +103,9 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     await db.architecture.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e) {
+    if ((e as { code?: string })?.code === "P2025") {
+      return NextResponse.json({ error: "Architecture introuvable" }, { status: 404 });
+    }
     console.error("DELETE /api/architectures/:id", e);
     return NextResponse.json({ error: "Erreur de suppression" }, { status: 500 });
   }

@@ -18,6 +18,7 @@ import {
   Hourglass,
   Inbox,
   Info,
+  Loader2,
   RefreshCw,
   Rocket,
   Timer,
@@ -25,9 +26,23 @@ import {
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { NodeMetrics, SimulationResult } from "@/types";
+import type { NodeMetrics, SimulationResult, SimulationSummary } from "@/types";
 import { useAppStore } from "@/stores/app-store";
 import { useSimulationStore } from "@/stores/simulation-store";
+import { storage } from "@/lib/persistence";
+import {
+  RESULT_MODE_LABELS,
+  RESULT_MODE_LONG_LABELS,
+  RESULT_MODE_PHRASES,
+  type ResultMode,
+} from "@/lib/labels";
+import {
+  ERROR_RATE_WARN,
+  P95_WARN_MS,
+  UTILIZATION_CRITICAL,
+  UTILIZATION_WARN,
+} from "@/lib/thresholds";
+import { EmptyState } from "@/components/shared/empty-state";
 import {
   formatCost,
   formatDateTime,
@@ -41,19 +56,30 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { CHARTS_CSS } from "./chart-theme";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { DiagnosticsSection } from "./diagnostics-section";
 import { KpiCard } from "./kpi-card";
 import { LoadMap } from "./load-map";
 import { NodeMetricsTable } from "./node-metrics-table";
 import { ResultsCharts } from "./time-charts";
 
-function modeLabel(mode: SimulationResult["mode"]): string {
-  return mode === "event-sampled" ? "Simulation événementielle" : "Estimation analytique";
+/* Libellés du mode d'exécution — source unique @/lib/labels. */
+function modeLabel(mode: ResultMode): string {
+  return RESULT_MODE_LONG_LABELS[mode];
 }
 
-function modePhrase(mode: SimulationResult["mode"]): string {
-  return mode === "event-sampled" ? "événementielle échantillonnée" : "analytique";
+function modeBadgeLabel(mode: ResultMode): string {
+  return RESULT_MODE_LABELS[mode];
+}
+
+function modePhrase(mode: ResultMode): string {
+  return RESULT_MODE_PHRASES[mode];
 }
 
 function maxBy<T>(items: T[], value: (item: T) => number): T | null {
@@ -73,28 +99,32 @@ export function ResultsView() {
   const currentResult = useAppStore((s) => s.currentResult);
   const setView = useAppStore((s) => s.setView);
   const openCompare = useAppStore((s) => s.openCompare);
+  const simulations = useAppStore((s) => s.simulations);
   const simStatus = useSimulationStore((s) => s.status);
   const runSimulation = useSimulationStore((s) => s.run);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
+  // Sélection de la simulation à confronter (l'ancien comportement comparait
+  // le résultat courant avec lui-même → deltas ±0).
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [comparingId, setComparingId] = useState<string | null>(null);
+
   /* ---------- État vide ---------- */
   if (!currentResult) {
     return (
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col items-center justify-center gap-5 p-6 py-28 text-center">
-        <span className="flex size-16 items-center justify-center rounded-2xl border bg-card shadow-sm">
-          <Inbox className="size-8 text-muted-foreground" />
-        </span>
-        <div className="space-y-1.5">
-          <h1 className="text-xl font-semibold tracking-tight">Aucun résultat</h1>
-          <p className="mx-auto max-w-md text-sm text-muted-foreground">
-            Aucun résultat — lancez une simulation depuis l&apos;éditeur pour afficher ici le
-            débit, les latences, la carte de charge et les diagnostics.
-          </p>
-        </div>
-        <Button onClick={() => setView("editor")}>
-          <Rocket className="size-4" />
-          Ouvrir l&apos;éditeur
-        </Button>
+      <div className="mx-auto w-full max-w-[1400px] p-6">
+        <EmptyState
+          icon={Inbox}
+          title="Aucun résultat pour le moment"
+          description="Lancez une simulation depuis l'éditeur : débit, latences, carte de charge et diagnostics s'afficheront ici."
+          action={
+            <Button onClick={() => setView("editor")}>
+              <Rocket className="size-4" />
+              Ouvrir l&apos;éditeur
+            </Button>
+          }
+          className="py-28"
+        />
       </div>
     );
   }
@@ -106,6 +136,51 @@ export function ResultsView() {
   const maxQueueNode = maxBy(nodes, (n: NodeMetrics) => n.maxQueueLength);
   const overBudget = overall.costPerMonthUsd > scenario.budgetPerMonthUsd;
   const running = simStatus === "running";
+
+  // Autres simulations comparables : même architecture d'abord, puis plus
+  // récentes d'abord. Le résultat courant (même id) est exclu. Calcul hors hook
+  // (après l'état vide) : liste ≤ 100 entrées, tri négligeable au rendu.
+  const compareCandidates = simulations
+    .filter((s) => s.id !== r.id)
+    .sort((a, b) => {
+      const sameA = a.architectureId === r.architectureId ? 0 : 1;
+      const sameB = b.architectureId === r.architectureId ? 0 : 1;
+      if (sameA !== sameB) return sameA - sameB;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+  const handleCompareClick = () => {
+    if (simulations.length < 2 || compareCandidates.length === 0) {
+      toast.info("Aucune autre simulation à comparer", {
+        description:
+          "Relancez une simulation pour comparer deux scénarios côte à côte.",
+      });
+      return;
+    }
+    setCompareOpen(true);
+  };
+
+  const handleChooseCompare = async (summary: SimulationSummary) => {
+    if (comparingId) return;
+    setComparingId(summary.id);
+    try {
+      const full = await storage.simulations.get(summary.id);
+      if (!full) {
+        toast.error("Simulation introuvable", {
+          description: "Elle a peut-être été supprimée — actualisez l'historique.",
+        });
+        return;
+      }
+      setCompareOpen(false);
+      openCompare(r, full);
+    } catch (error) {
+      toast.error("Comparaison impossible", {
+        description: error instanceof Error ? error.message : "Erreur inconnue.",
+      });
+    } finally {
+      setComparingId(null);
+    }
+  };
 
   const handleRerun = async () => {
     if (running) return;
@@ -129,7 +204,7 @@ export function ResultsView() {
 
   return (
     <div className="mx-auto w-full max-w-[1400px] p-6 pb-16">
-      <style>{CHARTS_CSS}</style>
+      {/* Les règles Recharts (.sl-charts) vivent dans globals.css. */}
 
       {/* ---------- En-tête ---------- */}
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -165,7 +240,7 @@ export function ResultsView() {
             <RefreshCw className={running ? "size-4 animate-spin" : "size-4"} />
             Relancer
           </Button>
-          <Button variant="outline" size="sm" onClick={() => openCompare(r, r)}>
+          <Button variant="outline" size="sm" onClick={handleCompareClick}>
             <GitCompare className="size-4" />
             Comparer
           </Button>
@@ -202,8 +277,12 @@ export function ResultsView() {
             icon={Gauge}
             label="Latence p95"
             value={formatMs(overall.p95Ms)}
-            accent={overall.p95Ms > 800 ? "warning" : "default"}
-            sub={overall.p95Ms > 800 ? "Au-delà de l'objectif de 800 ms" : "Objectif : < 800 ms"}
+            accent={overall.p95Ms > P95_WARN_MS ? "warning" : "default"}
+            sub={
+              overall.p95Ms > P95_WARN_MS
+                ? `Au-delà de l'objectif de ${P95_WARN_MS} ms`
+                : `Objectif : < ${P95_WARN_MS} ms`
+            }
           />
           <KpiCard
             icon={Hourglass}
@@ -215,7 +294,7 @@ export function ResultsView() {
             icon={TriangleAlert}
             label="Taux d'erreur"
             value={formatPercent(overall.errorRate)}
-            accent={overall.errorRate > 0.02 ? "destructive" : "default"}
+            accent={overall.errorRate > ERROR_RATE_WARN ? "destructive" : "default"}
             sub={`${formatNumber(overall.errorRequests)} requêtes en erreur`}
           />
           <KpiCard
@@ -243,9 +322,9 @@ export function ResultsView() {
             value={formatPercent(maxUtilNode?.utilizationMax ?? 0)}
             sub={maxUtilNode ? `Nœud : ${maxUtilNode.label}` : undefined}
             accent={
-              (maxUtilNode?.utilizationMax ?? 0) >= 0.85
+              (maxUtilNode?.utilizationMax ?? 0) >= UTILIZATION_CRITICAL
                 ? "destructive"
-                : (maxUtilNode?.utilizationMax ?? 0) >= 0.6
+                : (maxUtilNode?.utilizationMax ?? 0) >= UTILIZATION_WARN
                   ? "warning"
                   : "default"
             }
@@ -301,8 +380,8 @@ export function ResultsView() {
           onSelectNode={setSelectedNodeId}
         />
         <p className="text-xs text-muted-foreground">
-          Cliquez sur un en-tête pour trier ; cliquez sur une ligne (ou un nœud de la carte) pour
-          la mettre en évidence.
+          Cliquez sur un en-tête pour trier ; cliquez sur une ligne (ou un nœud de la carte,
+          au clavier comme à la souris) pour la mettre en évidence.
         </p>
       </section>
 
@@ -345,6 +424,60 @@ export function ResultsView() {
       <p className="mt-10 text-center text-xs text-muted-foreground">
         Simulation locale — aucune donnée réelle n&apos;a été mesurée.
       </p>
+
+      {/* ---------- Sélection de la simulation à comparer ---------- */}
+      <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Comparer avec…</DialogTitle>
+            <DialogDescription>
+              Choisissez une autre simulation archivée à confronter à «&nbsp;{r.architectureName}
+              &nbsp;». Les simulations de la même architecture sont proposées en premier.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+            {compareCandidates.map((sim) => (
+              <button
+                key={sim.id}
+                type="button"
+                disabled={comparingId !== null}
+                onClick={() => void handleChooseCompare(sim)}
+                className="flex w-full items-center gap-3 rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{sim.architectureName}</p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <CalendarClock className="size-3" aria-hidden />
+                      {formatDateTime(sim.createdAt)}
+                    </span>
+                    <span aria-hidden>·</span>
+                    <span className="font-mono">seed {sim.seed}</span>
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge
+                    variant="outline"
+                    className={
+                      sim.mode === "analytical"
+                        ? "border-info/40 bg-info/10 font-normal text-info"
+                        : "border-primary/30 bg-primary/10 font-normal text-primary"
+                    }
+                  >
+                    {modeBadgeLabel(sim.mode)}
+                  </Badge>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    p95 {formatMs(sim.overall.p95Ms)} · {formatPercent(sim.overall.availability)}
+                  </span>
+                </div>
+                {comparingId === sim.id && (
+                  <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+                )}
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -6,27 +6,30 @@
  * selon useAppStore().activeView. L'éditeur occupe toute la hauteur
  * (sans scroll) ; les autres vues défilent dans un conteneur.
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import {
-  ChevronLeft,
+  Activity,
+  ArrowLeft,
   FlaskConical,
+  GitCompare,
   GraduationCap,
   History,
-  LayoutGrid,
+  LayoutDashboard,
   Loader2,
   Menu,
   Monitor,
   Moon,
   MousePointerClick,
   Settings,
+  Shapes,
   Sun,
-  Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore, VIEW_LABELS } from "@/stores/app-store";
+import { useEditorStore } from "@/stores/editor-store";
 import type { AppView } from "@/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -83,21 +86,22 @@ function ViewLoading({ label }: { label: string }) {
   );
 }
 
-const NAV_ITEMS: { view: AppView; label: string; icon: typeof LayoutGrid }[] = [
-  { view: "dashboard", label: "Tableau de bord", icon: LayoutGrid },
+/* Une icône DISTINCTE par vue — aucune double attribution. */
+const NAV_ITEMS: { view: AppView; label: string; icon: typeof LayoutDashboard }[] = [
+  { view: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { view: "editor", label: "Éditeur", icon: MousePointerClick },
-  { view: "templates", label: "Modèles", icon: LayoutGrid },
+  { view: "templates", label: "Modèles", icon: Shapes },
   { view: "learn", label: "Apprentissage", icon: GraduationCap },
   { view: "history", label: "Historique", icon: History },
 ];
 
-const ICONS: Record<AppView, typeof LayoutGrid> = {
+const ICONS: Record<AppView, typeof LayoutDashboard> = {
   landing: FlaskConical,
-  dashboard: LayoutGrid,
+  dashboard: LayoutDashboard,
   editor: MousePointerClick,
-  results: ChevronLeft,
-  compare: History,
-  templates: LayoutGrid,
+  results: Activity,
+  compare: GitCompare,
+  templates: Shapes,
   learn: GraduationCap,
   history: History,
   settings: Settings,
@@ -221,6 +225,32 @@ export function AppShell() {
     void refreshSimulations();
   }, [refreshArchitectures, refreshSimulations]);
 
+  /*
+   * Garde anti-perte navigateur : rechargement / fermeture d'onglet alors
+   * qu'un document modifié n'est pas sauvegardé (l'auto-save ne couvre que
+   * les documents déjà persistés) → dialogue natif de confirmation.
+   */
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (useEditorStore.getState().dirty) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  /*
+   * Reset du scroll au changement de vue : le conteneur qui défile est ce
+   * <main> (il reste monté entre les vues — seul l'enfant est key={activeView}),
+   * sans quoi on arrive au milieu de la page précédente.
+   */
+  const mainRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [activeView]);
+
   /* Titre de l'onglet dynamique. */
   useEffect(() => {
     const label = VIEW_LABELS[activeView];
@@ -283,10 +313,10 @@ export function AppShell() {
             variant="ghost"
             size="icon"
             className="h-8 w-8"
-            aria-label="Retour"
+            aria-label="Retour à la vue précédente"
             onClick={goBack}
           >
-            <Undo2 className="h-4 w-4 rotate-0" />
+            <ArrowLeft className="h-4 w-4" />
           </Button>
         )}
 
@@ -348,7 +378,7 @@ export function AppShell() {
                 <Settings className="h-4 w-4" /> Paramètres
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setView("dashboard")}>
-                <LayoutGrid className="h-4 w-4" /> Tableau de bord
+                <LayoutDashboard className="h-4 w-4" /> Tableau de bord
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() =>
@@ -373,6 +403,8 @@ export function AppShell() {
         </main>
       ) : (
         <main
+          ref={mainRef}
+          id="app-main"
           className="min-h-0 flex-1 overflow-y-auto"
           aria-label={VIEW_LABELS[activeView]}
         >

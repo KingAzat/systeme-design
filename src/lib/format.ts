@@ -91,8 +91,8 @@ export function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
-/** Génère un identifiant court unique (préfixe + base36) */
+/** Génère un identifiant court unique (préfixe + horodatage + aléa cryptographique) */
 export function shortId(prefix: string): string {
-  const rnd = Math.random().toString(36).slice(2, 8);
+  const rnd = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
   return `${prefix}-${Date.now().toString(36)}${rnd}`;
 }

@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown, Filter, Search, Star, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getCategoryStyle } from "@/lib/icons";
+import { MATURITY_LABELS } from "@/lib/labels";
 import {
   CATEGORIES,
   getComponentsByCategory,
@@ -38,23 +39,24 @@ import { CatalogIcon } from "../catalog-icon";
 
 type LibraryTab = "all" | "favorites" | "recents";
 
+/** Limite d'affichage des résultats de recherche (60 premiers). */
+const SEARCH_RESULTS_LIMIT = 60;
+
 const MATURITY_META: Record<
   SimulationMaturity,
-  { label: string; classes: string; title: string }
+  { classes: string; title: string }
 > = {
   simulated: {
-    label: "Simulé",
     classes:
-      "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300",
+      "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
     title: "Composant entièrement simulé par le moteur",
   },
   partial: {
-    label: "Partiel",
-    classes: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300",
+    // amber-700 (au lieu de amber-600) : contraste AA en mode clair.
+    classes: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300",
     title: "Modélisation partielle : latence et capacité génériques",
   },
   visual: {
-    label: "Visuel",
     classes:
       "bg-slate-100 text-slate-600 dark:bg-slate-500/10 dark:text-slate-300",
     title: "Composant visuel : non pris en compte par la simulation",
@@ -68,7 +70,7 @@ function MaturityBadge({ maturity }: { maturity: SimulationMaturity }) {
       title={meta.title}
       className={cn("rounded px-1 py-px text-[10px] leading-4 font-medium", meta.classes)}
     >
-      {meta.label}
+      {MATURITY_LABELS[maturity]}
     </span>
   );
 }
@@ -246,6 +248,11 @@ export function ComponentLibrary({ className, onCollapse }: ComponentLibraryProp
     return searchComponents(trimmed);
   }, [query]);
 
+  // Affichage borné : les 60 premiers résultats suffisent à couvrir toute
+  // recherche pertinente et gardent le panneau fluide sur petit écran.
+  const visibleSearchResults = searchResults.slice(0, SEARCH_RESULTS_LIMIT);
+  const searchTruncated = searchResults.length > SEARCH_RESULTS_LIMIT;
+
   const favoriteComponents = useMemo(
     () =>
       favorites
@@ -345,7 +352,15 @@ export function ComponentLibrary({ className, onCollapse }: ComponentLibraryProp
             {searchResults.length === 0 ? (
               <EmptyList message="Aucun composant ne correspond à cette recherche." />
             ) : (
-              renderGrid(applyFilter(searchResults))
+              <>
+                {renderGrid(applyFilter(visibleSearchResults))}
+                {searchTruncated && (
+                  <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
+                    {SEARCH_RESULTS_LIMIT} premiers résultats affichés — affinez votre
+                    recherche pour les réduire.
+                  </p>
+                )}
+              </>
             )}
           </div>
         ) : tab === "favorites" ? (

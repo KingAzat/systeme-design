@@ -586,7 +586,9 @@ export function LearnView() {
   const learned = useLearnedCourses();
 
   useEffect(() => {
-    window.scrollTo({ top: 0 });
+    // Le conteneur qui défile est le <main id="app-main"> du shell —
+    // window ne défile pas, l'ancien window.scrollTo était sans effet.
+    document.getElementById("app-main")?.scrollTo({ top: 0 });
   }, [activeCourseSlug]);
 
   const course = activeCourseSlug !== null ? COURSE_MAP[activeCourseSlug] : undefined;

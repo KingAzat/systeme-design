@@ -1,0 +1,657 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * SystemLab — vue Comparaison A/B de deux simulations archivées.
+     5→ * Sélecteur si compareA/compareB absents, sinon tableau comparatif,
+     6→ * graphiques côte à côte et résumé des compromis généré depuis les deltas.
+     7→ */
+     8→import { useEffect, useState } from "react";
+     9→import {
+    10→  ArrowLeft,
+    11→  ArrowUpDown,
+    12→  CloudOff,
+    13→  GitCompare,
+    14→  Inbox,
+    15→  RefreshCw,
+    16→  Scale,
+    17→} from "lucide-react";
+    18→import { toast } from "sonner";
+    19→import {
+    20→  Bar,
+    21→  BarChart,
+    22→  CartesianGrid,
+    23→  Legend,
+    24→  ResponsiveContainer,
+    25→  Tooltip,
+    26→  XAxis,
+    27→  YAxis,
+    28→} from "recharts";
+    29→import type { OverallMetrics, SimulationResult } from "@/types";
+    30→import { useAppStore } from "@/stores/app-store";
+    31→import { storage } from "@/lib/persistence";
+    32→import {
+    33→  formatCost,
+    34→  formatDateTime,
+    35→  formatMs,
+    36→  formatPercent,
+    37→  formatRequests,
+    38→  formatRps,
+    39→} from "@/lib/format";
+    40→import { Badge } from "@/components/ui/badge";
+    41→import { Button } from "@/components/ui/button";
+    42→import {
+    43→  Alert,
+    44→  AlertDescription,
+    45→  AlertTitle,
+    46→} from "@/components/ui/alert";
+    47→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    48→import {
+    49→  Select,
+    50→  SelectContent,
+    51→  SelectItem,
+    52→  SelectTrigger,
+    53→  SelectValue,
+    54→} from "@/components/ui/select";
+    55→import { Skeleton } from "@/components/ui/skeleton";
+    56→import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    57→import { MetricRow, type DeltaTone } from "./metric-row";
+    58→import {
+    59→  CHART_HEX,
+    60→  CHARTS_CSS,
+    61→  GRID_STROKE,
+    62→  TOOLTIP_ITEM_STYLE,
+    63→  TOOLTIP_LABEL_STYLE,
+    64→  TOOLTIP_STYLE,
+    65→} from "../results/chart-theme";
+    66→
+    67→/* ============================================================
+    68→ * Définitions des métriques comparées
+    69→ * ============================================================ */
+    70→
+    71→type Direction = "higher" | "lower" | "neutral";
+    72→
+    73→/** Clés numériques de OverallMetrics (exclut bottleneckNodeId). */
+    74→type NumericMetricKey = {
+    75→  [K in keyof OverallMetrics]: OverallMetrics[K] extends number ? K : never;
+    76→}[keyof OverallMetrics];
+    77→
+    78→interface MetricDef {
+    79→  key: NumericMetricKey;
+    80→  label: string;
+    81→  format: (n: number) => string;
+    82→  direction: Direction;
+    83→  deltaFormat: (n: number) => string;
+    84→}
+    85→
+    86→const sign = (n: number): string => (n > 0 ? "+" : n < 0 ? "−" : "±");
+    87→
+    88→const signed =
+    89→  (fmt: (n: number) => string) =>
+    90→  (n: number): string =>
+    91→    `${sign(n)}${fmt(Math.abs(n))}`;
+    92→
+    93→const points = (n: number): string =>
+    94→  `${sign(n)}${(Math.abs(n) * 100).toFixed(1).replace(".", ",")} pt`;
+    95→
+    96→const METRICS: MetricDef[] = [
+    97→  { key: "servedRps", label: "Débit traité", format: formatRps, direction: "higher", deltaFormat: signed(formatRps) },
+    98→  { key: "inputRps", label: "Débit entrant", format: formatRps, direction: "higher", deltaFormat: signed(formatRps) },
+    99→  { key: "latencyAvgMs", label: "Latence moyenne", format: formatMs, direction: "lower", deltaFormat: signed(formatMs) },
+   100→  { key: "p50Ms", label: "Latence p50", format: formatMs, direction: "lower", deltaFormat: signed(formatMs) },
+   101→  { key: "p95Ms", label: "Latence p95", format: formatMs, direction: "lower", deltaFormat: signed(formatMs) },
+   102→  { key: "p99Ms", label: "Latence p99", format: formatMs, direction: "lower", deltaFormat: signed(formatMs) },
+   103→  { key: "errorRate", label: "Taux d'erreur", format: formatPercent, direction: "lower", deltaFormat: points },
+   104→  { key: "rejectedRequests", label: "Requêtes rejetées", format: formatRequests, direction: "lower", deltaFormat: signed(formatRequests) },
+   105→  { key: "availability", label: "Disponibilité", format: formatPercent, direction: "higher", deltaFormat: points },
+   106→  { key: "costPerMonthUsd", label: "Coût estimé", format: formatCost, direction: "lower", deltaFormat: signed(formatCost) },
+   107→  { key: "totalRequests", label: "Requêtes totales", format: formatRequests, direction: "neutral", deltaFormat: signed(formatRequests) },
+   108→];
+   109→
+   110→function toneOf(def: MetricDef, a: number, b: number): DeltaTone {
+   111→  if (def.direction === "neutral") return "neutral";
+   112→  const diff = b - a;
+   113→  if (Math.abs(diff) < 1e-9) return "neutral";
+   114→  const better = def.direction === "higher" ? diff > 0 : diff < 0;
+   115→  return better ? "better" : "worse";
+   116→}
+   117→
+   118→/* ============================================================
+   119→ * Résumé des compromis (règles simples, déterministe)
+   120→ * ============================================================ */
+   121→
+   122→interface SummaryAxis {
+   123→  key: NumericMetricKey;
+   124→  label: string;
+   125→  direction: "higher" | "lower";
+   126→  unit: "pct" | "points";
+   127→}
+   128→
+   129→const SUMMARY_AXES: SummaryAxis[] = [
+   130→  { key: "latencyAvgMs", label: "la latence moyenne", direction: "lower", unit: "pct" },
+   131→  { key: "p95Ms", label: "la latence p95", direction: "lower", unit: "pct" },
+   132→  { key: "errorRate", label: "le taux d'erreur", direction: "lower", unit: "points" },
+   133→  { key: "rejectedRequests", label: "les requêtes rejetées", direction: "lower", unit: "pct" },
+   134→  { key: "servedRps", label: "le débit traité", direction: "higher", unit: "pct" },
+   135→  { key: "availability", label: "la disponibilité", direction: "higher", unit: "points" },
+   136→  { key: "costPerMonthUsd", label: "le coût estimé", direction: "lower", unit: "pct" },
+   137→];
+   138→
+   139→function joinFr(items: string[]): string {
+   140→  if (items.length <= 1) return items.join("");
+   141→  return `${items.slice(0, -1).join(", ")} et ${items[items.length - 1]}`;
+   142→}
+   143→
+   144→function buildTradeoffSummary(a: SimulationResult, b: SimulationResult): string[] {
+   145→  const improved: string[] = [];
+   146→  const degraded: string[] = [];
+   147→
+   148→  for (const axis of SUMMARY_AXES) {
+   149→    const va = a.overall[axis.key];
+   150→    const vb = b.overall[axis.key];
+   151→    const diff = vb - va;
+   152→    if (Math.abs(diff) < 1e-12) continue;
+   153→    const pct = va !== 0 ? diff / Math.abs(va) : null;
+   154→    if (axis.unit === "pct") {
+   155→      if (pct === null ? Math.abs(diff) < 1e-9 : Math.abs(pct) < 0.03) continue;
+   156→    } else if (Math.abs(diff) < 0.001) continue;
+   157→
+   158→    const change =
+   159→      axis.unit === "pct"
+   160→        ? pct !== null
+   161→          ? `${Math.round(Math.abs(pct) * 100)} %`
+   162→          : formatRequests(Math.abs(diff))
+   163→        : `${(Math.abs(diff) * 100).toFixed(1).replace(".", ",")} points`;
+   164→    const item = `${axis.label} de ${change}`;
+   165→    const better = axis.direction === "higher" ? diff > 0 : diff < 0;
+   166→    (better ? improved : degraded).push(item);
+   167→  }
+   168→
+   169→  const sentences: string[] = [];
+   170→  if (improved.length > 0 && degraded.length > 0) {
+   171→    sentences.push(
+   172→      `La version B améliore ${joinFr(improved)} mais dégrade ${joinFr(degraded)}.`,
+   173→    );
+   174→  } else if (improved.length > 0) {
+   175→    sentences.push(
+   176→      `La version B améliore ${joinFr(improved)} sans dégradation notable des autres indicateurs.`,
+   177→    );
+   178→  } else if (degraded.length > 0) {
+   179→    sentences.push(
+   180→      `La version B dégrade ${joinFr(degraded)} sans gain mesurable sur les autres indicateurs.`,
+   181→    );
+   182→  } else {
+   183→    sentences.push(
+   184→      "Les deux versions affichent des écarts non significatifs (< 3 %) sur l'ensemble des indicateurs suivis.",
+   185→    );
+   186→  }
+   187→
+   188→  const p95Better = b.overall.p95Ms < a.overall.p95Ms;
+   189→  const costBetter = b.overall.costPerMonthUsd < a.overall.costPerMonthUsd;
+   190→  if (p95Better && costBetter) {
+   191→    sentences.push(
+   192→      "Verdict : la version B domine à la fois en latence et en coût — elle peut remplacer la version A.",
+   193→    );
+   194→  } else if (!p95Better && !costBetter) {
+   195→    sentences.push(
+   196→      "Verdict : la version A reste préférable sur la latence et le coût.",
+   197→    );
+   198→  } else if (p95Better) {
+   199→    sentences.push(
+   200→      "Verdict : le gain de latence se paie par un coût supérieur — pertinente si la priorité est la performance.",
+   201→    );
+   202→  } else {
+   203→    sentences.push(
+   204→      "Verdict : l'économie réalisée se paie en latence — pertinente si la priorité est le budget.",
+   205→    );
+   206→  }
+   207→  return sentences;
+   208→}
+   209→
+   210→/* ============================================================
+   211→ * Écran de sélection (compareA ou compareB absent)
+   212→ * ============================================================ */
+   213→
+   214→function CompareSelector() {
+   215→  const simulations = useAppStore((s) => s.simulations);
+   216→  const simulationsLoading = useAppStore((s) => s.simulationsLoading);
+   217→  const simulationsError = useAppStore((s) => s.simulationsError);
+   218→  const refreshSimulations = useAppStore((s) => s.refreshSimulations);
+   219→  const openCompare = useAppStore((s) => s.openCompare);
+   220→  const setView = useAppStore((s) => s.setView);
+   221→  const goBack = useAppStore((s) => s.goBack);
+   222→  const viewHistory = useAppStore((s) => s.viewHistory);
+   223→
+   224→  const [idA, setIdA] = useState<string>("");
+   225→  const [idB, setIdB] = useState<string>("");
+   226→  const [loading, setLoading] = useState(false);
+   227→
+   228→  // Garde !loading (lecture fraîche via getState) : évite de relancer un
+   229→  // chargement déjà en cours — le shell précharge au montage.
+   230→  useEffect(() => {
+   231→    const s = useAppStore.getState();
+   232→    if (s.simulations.length === 0 && !s.simulationsLoading) {
+   233→      void s.refreshSimulations();
+   234→    }
+   235→  }, [simulations.length, refreshSimulations]);
+   236→
+   237→  const selectedA = simulations.find((s) => s.id === idA);
+   238→  const selectedB = simulations.find((s) => s.id === idB);
+   239→
+   240→  const handleCompare = async () => {
+   241→    if (!idA || !idB || loading) return;
+   242→    setLoading(true);
+   243→    try {
+   244→      const [resultA, resultB] = await Promise.all([
+   245→        storage.simulations.get(idA),
+   246→        storage.simulations.get(idB),
+   247→      ]);
+   248→      if (!resultA || !resultB) {
+   249→        toast.error("Simulation introuvable", {
+   250→          description: "Elle a peut-être été supprimée — actualisez la liste.",
+   251→        });
+   252→        return;
+   253→      }
+   254→      openCompare(resultA, resultB);
+   255→    } catch (error) {
+   256→      toast.error("Comparaison impossible", {
+   257→        description: error instanceof Error ? error.message : "Erreur inconnue.",
+   258→      });
+   259→    } finally {
+   260→      setLoading(false);
+   261→    }
+   262→  };
+   263→
+   264→  const renderColumn = (tag: "A" | "B") => {
+   265→    const value = tag === "A" ? idA : idB;
+   266→    const other = tag === "A" ? idB : idA;
+   267→    const setValue = tag === "A" ? setIdA : setIdB;
+   268→    const selected = tag === "A" ? selectedA : selectedB;
+   269→    return (
+   270→      <div className="space-y-2">
+   271→        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+   272→          Version {tag}
+   273→        </p>
+   274→        <Select value={value} onValueChange={setValue}>
+   275→          <SelectTrigger className="w-full">
+   276→            <SelectValue placeholder="Choisir une simulation archivée…" />
+   277→          </SelectTrigger>
+   278→          <SelectContent>
+   279→            {simulations.map((sim) => (
+   280→              <SelectItem key={sim.id} value={sim.id} disabled={sim.id === other}>
+   281→                {sim.architectureName} · seed {sim.seed} · {formatDateTime(sim.createdAt)}
+   282→              </SelectItem>
+   283→            ))}
+   284→          </SelectContent>
+   285→        </Select>
+   286→        {selected ? (
+   287→          <p className="text-xs text-muted-foreground">
+   288→            {formatRps(selected.overall.servedRps)} · p95 {formatMs(selected.overall.p95Ms)} ·{" "}
+   289→            {formatPercent(selected.overall.errorRate)} d&apos;erreurs ·{" "}
+   290→            {formatCost(selected.overall.costPerMonthUsd)}
+   291→          </p>
+   292→        ) : null}
+   293→      </div>
+   294→    );
+   295→  };
+   296→
+   297→  return (
+   298→    <div className="mx-auto w-full max-w-[1400px] p-6 pb-16">
+   299→      <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+   300→        <div>
+   301→          <h1 className="text-2xl font-semibold tracking-tight">Comparaison d&apos;architectures</h1>
+   302→          <p className="mt-1 text-sm text-muted-foreground">
+   303→            Sélectionnez deux simulations archivées pour comparer leurs métriques côte à côte.
+   304→          </p>
+   305→        </div>
+   306→        <div className="flex flex-wrap items-center gap-2">
+   307→          <Button
+   308→            variant="outline"
+   309→            size="sm"
+   310→            onClick={() => void refreshSimulations()}
+   311→            disabled={simulationsLoading}
+   312→          >
+   313→            <RefreshCw className={simulationsLoading ? "size-4 animate-spin" : "size-4"} />
+   314→            Actualiser
+   315→          </Button>
+   316→          <Button
+   317→            variant="ghost"
+   318→            size="sm"
+   319→            onClick={() => (viewHistory.length > 0 ? goBack() : setView("history"))}
+   320→          >
+   321→            <ArrowLeft className="size-4" />
+   322→            Retour
+   323→          </Button>
+   324→        </div>
+   325→      </header>
+   326→
+   327→      {simulationsError ? (
+   328→        <div className="mt-16 flex justify-center">
+   329→          <div className="w-full max-w-md">
+   330→            <Alert variant="destructive" role="alert">
+   331→              <CloudOff aria-hidden />
+   332→              <AlertTitle>Serveur local injoignable</AlertTitle>
+   333→              <AlertDescription>
+   334→                Les simulations n&apos;ont pas pu être chargées — vos archives ne sont
+   335→                pas perdues. Réessayez plus tard.
+   336→              </AlertDescription>
+   337→            </Alert>
+   338→          </div>
+   339→        </div>
+   340→      ) : simulationsLoading && simulations.length === 0 ? (
+   341→        <div className="mt-10 grid gap-6 md:grid-cols-2">
+   342→          <Skeleton className="h-20 w-full" />
+   343→          <Skeleton className="h-20 w-full" />
+   344→        </div>
+   345→      ) : simulations.length === 0 ? (
+   346→        <div className="mt-16 flex flex-col items-center justify-center gap-5 text-center">
+   347→          <span className="flex size-16 items-center justify-center rounded-2xl border bg-card shadow-sm">
+   348→            <Inbox className="size-8 text-muted-foreground" />
+   349→          </span>
+   350→          <div className="space-y-1.5">
+   351→            <h2 className="text-lg font-semibold">Aucune simulation archivée</h2>
+   352→            <p className="mx-auto max-w-md text-sm text-muted-foreground">
+   353→              Lancez au moins deux simulations depuis l&apos;éditeur pour pouvoir les comparer.
+   354→            </p>
+   355→          </div>
+   356→          <Button onClick={() => setView("editor")}>Ouvrir l&apos;éditeur</Button>
+   357→        </div>
+   358→      ) : (
+   359→        <>
+   360→          <div className="mt-10 grid gap-6 md:grid-cols-2">
+   361→            {renderColumn("A")}
+   362→            {renderColumn("B")}
+   363→          </div>
+   364→          <div className="mt-8 flex flex-wrap items-center gap-3">
+   365→            <Button onClick={handleCompare} disabled={!idA || !idB || loading}>
+   366→              {loading ? (
+   367→                <RefreshCw className="size-4 animate-spin" />
+   368→              ) : (
+   369→                <GitCompare className="size-4" />
+   370→              )}
+   371→              Comparer
+   372→            </Button>
+   373→            <p className="text-xs text-muted-foreground">
+   374→              {simulations.length} simulation{simulations.length > 1 ? "s" : ""} archivée
+   375→              {simulations.length > 1 ? "s" : ""} disponible
+   376→              {simulations.length > 1 ? "s" : ""}.
+   377→            </p>
+   378→          </div>
+   379→        </>
+   380→      )}
+   381→    </div>
+   382→  );
+   383→}
+   384→
+   385→/* ============================================================
+   386→ * Écran de comparaison (A et B présents)
+   387→ * ============================================================ */
+   388→
+   389→function modeLabelShort(mode: SimulationResult["mode"]): string {
+   390→  return mode === "event-sampled" ? "événementielle" : "analytique";
+   391→}
+   392→
+   393→function truncateName(name: string, max = 20): string {
+   394→  return name.length > max ? `${name.slice(0, max - 1)}…` : name;
+   395→}
+   396→
+   397→function VersionCard({ tag, result, tone }: { tag: string; result: SimulationResult; tone: "a" | "b" }) {
+   398→  return (
+   399→    <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
+   400→      <div className="flex items-center justify-between gap-2">
+   401→        <span
+   402→          className={
+   403→            tone === "a"
+   404→              ? "text-xs font-semibold uppercase tracking-wide text-primary"
+   405→              : "text-xs font-semibold uppercase tracking-wide text-info"
+   406→          }
+   407→        >
+   408→          Version {tag}
+   409→        </span>
+   410→        <span className="font-mono text-xs text-muted-foreground">seed {result.seed}</span>
+   411→      </div>
+   412→      <p className="mt-1 truncate text-sm font-semibold" title={result.architectureName}>
+   413→        {result.architectureName}
+   414→      </p>
+   415→      <p className="mt-0.5 text-xs text-muted-foreground">
+   416→        {formatDateTime(result.startedAt)} · {modeLabelShort(result.mode)}
+   417→      </p>
+   418→    </div>
+   419→  );
+   420→}
+   421→
+   422→function ComparisonScreen({ a, b }: { a: SimulationResult; b: SimulationResult }) {
+   423→  const openCompare = useAppStore((s) => s.openCompare);
+   424→  const setView = useAppStore((s) => s.setView);
+   425→  const openEditorWithCommand = useAppStore((s) => s.openEditorWithCommand);
+   426→
+   427→  const nameA = truncateName(a.architectureName);
+   428→  const nameB = truncateName(b.architectureName);
+   429→  const summary = buildTradeoffSummary(a, b);
+   430→
+   431→  const latencyData = [
+   432→    { name: "Moyenne", A: a.overall.latencyAvgMs, B: b.overall.latencyAvgMs },
+   433→    { name: "p50", A: a.overall.p50Ms, B: b.overall.p50Ms },
+   434→    { name: "p95", A: a.overall.p95Ms, B: b.overall.p95Ms },
+   435→    { name: "p99", A: a.overall.p99Ms, B: b.overall.p99Ms },
+   436→  ];
+   437→  const volumeData = [
+   438→    { name: "Traités", A: a.overall.servedRequests, B: b.overall.servedRequests },
+   439→    { name: "Rejetés", A: a.overall.rejectedRequests, B: b.overall.rejectedRequests },
+   440→    { name: "Erreurs", A: a.overall.errorRequests, B: b.overall.errorRequests },
+   441→  ];
+   442→
+   443→  const loadInEditor = (result: SimulationResult) => {
+   444→    if (result.architectureId && result.architectureId !== "local") {
+   445→      openEditorWithCommand({ kind: "open-architecture", architectureId: result.architectureId });
+   446→    } else {
+   447→      toast.warning("Version non sauvegardée : impossible de la recharger", {
+   448→        description: "Cette simulation provient d'une architecture locale non persistée.",
+   449→      });
+   450→    }
+   451→  };
+   452→
+   453→  return (
+   454→    <div className="mx-auto w-full max-w-[1400px] p-6 pb-16">
+   455→      <style>{CHARTS_CSS}</style>
+   456→
+   457→      <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+   458→        <div>
+   459→          <h1 className="text-2xl font-semibold tracking-tight">Comparaison d&apos;architectures</h1>
+   460→          <p className="mt-1 text-sm text-muted-foreground">
+   461→            Deux simulations confrontées métrique par métrique — les deltas sont orientés
+   462→            (vert = la version B progresse sur l&apos;axe).
+   463→          </p>
+   464→        </div>
+   465→        <div className="flex flex-wrap items-center gap-2">
+   466→          <Button variant="outline" size="sm" onClick={() => openCompare(b, a)}>
+   467→            <ArrowUpDown className="size-4" />
+   468→            Échanger
+   469→          </Button>
+   470→          <Button variant="outline" size="sm" onClick={() => setView("editor")}>
+   471→            <ArrowLeft className="size-4" />
+   472→            Retour à l&apos;éditeur
+   473→          </Button>
+   474→          <Button variant="outline" size="sm" onClick={() => loadInEditor(a)}>
+   475→            Charger A dans l&apos;éditeur
+   476→          </Button>
+   477→          <Button variant="outline" size="sm" onClick={() => loadInEditor(b)}>
+   478→            Charger B
+   479→          </Button>
+   480→        </div>
+   481→      </header>
+   482→
+   483→      <div className="mt-6 grid items-stretch gap-3 md:grid-cols-[1fr_auto_1fr]">
+   484→        <VersionCard tag="A" result={a} tone="a" />
+   485→        <div className="flex items-center justify-center">
+   486→          <Badge variant="secondary">vs</Badge>
+   487→        </div>
+   488→        <VersionCard tag="B" result={b} tone="b" />
+   489→      </div>
+   490→
+   491→      {/* ---------- Tableau comparatif ---------- */}
+   492→      <section className="mt-8 space-y-3">
+   493→        <h2 className="text-lg font-semibold tracking-tight">Métriques comparées</h2>
+   494→        <div className="overflow-hidden rounded-xl border">
+   495→          <Table className="min-w-[680px]">
+   496→            <TableHeader>
+   497→              <TableRow className="bg-muted/40 hover:bg-muted/40">
+   498→                <TableHead>Métrique</TableHead>
+   499→                <TableHead className="max-w-[200px] truncate text-right" title={a.architectureName}>
+   500→                  {nameA}
+   501→                </TableHead>
+   502→                <TableHead className="max-w-[200px] truncate text-right" title={b.architectureName}>
+   503→                  {nameB}
+   504→                </TableHead>
+   505→                <TableHead className="text-right">Δ (B − A)</TableHead>
+   506→              </TableRow>
+   507→            </TableHeader>
+   508→            <TableBody>
+   509→              {METRICS.map((def) => {
+   510→                const va = a.overall[def.key];
+   511→                const vb = b.overall[def.key];
+   512→                const diff = vb - va;
+   513→                const pct = va !== 0 ? diff / Math.abs(va) : null;
+   514→                const relative =
+   515→                  pct !== null && Math.abs(pct) >= 0.01
+   516→                    ? `${pct > 0 ? "+" : "−"}${Math.round(Math.abs(pct) * 100)} %`
+   517→                    : undefined;
+   518→                return (
+   519→                  <MetricRow
+   520→                    key={def.key}
+   521→                    label={def.label}
+   522→                    valueA={def.format(va)}
+   523→                    valueB={def.format(vb)}
+   524→                    delta={def.deltaFormat(diff)}
+   525→                    relative={relative}
+   526→                    tone={toneOf(def, va, vb)}
+   527→                  />
+   528→                );
+   529→              })}
+   530→            </TableBody>
+   531→          </Table>
+   532→        </div>
+   533→      </section>
+   534→
+   535→      {/* ---------- Graphiques ---------- */}
+   536→      <section className="mt-10 space-y-3">
+   537→        <h2 className="text-lg font-semibold tracking-tight">Graphiques</h2>
+   538→        <div className="sl-charts grid gap-4 lg:grid-cols-2">
+   539→          <Card className="gap-3 py-4">
+   540→            <CardHeader className="px-4">
+   541→              <CardTitle className="text-sm font-semibold">Latences (ms)</CardTitle>
+   542→              <CardDescription className="text-xs">
+   543→                Moyenne et percentiles par version.
+   544→              </CardDescription>
+   545→            </CardHeader>
+   546→            <CardContent className="px-2 pb-2">
+   547→              <div className="h-[240px]">
+   548→                <ResponsiveContainer width="100%" height="100%">
+   549→                  <BarChart data={latencyData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+   550→                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
+   551→                    <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
+   552→                    <YAxis
+   553→                      width={56}
+   554→                      tickLine={false}
+   555→                      axisLine={false}
+   556→                      tickFormatter={(v) => formatMs(Number(v))}
+   557→                    />
+   558→                    <Tooltip
+   559→                      contentStyle={TOOLTIP_STYLE}
+   560→                      labelStyle={TOOLTIP_LABEL_STYLE}
+   561→                      itemStyle={TOOLTIP_ITEM_STYLE}
+   562→                      cursor={{ fill: "rgba(100, 116, 139, 0.08)" }}
+   563→                      formatter={(value, name) => [formatMs(Number(value)), name]}
+   564→                    />
+   565→                    <Legend iconType="circle" iconSize={9} />
+   566→                    <Bar dataKey="A" name={nameA} fill={CHART_HEX.indigo} radius={[4, 4, 0, 0]} maxBarSize={40} />
+   567→                    <Bar dataKey="B" name={nameB} fill={CHART_HEX.info} radius={[4, 4, 0, 0]} maxBarSize={40} />
+   568→                  </BarChart>
+   569→                </ResponsiveContainer>
+   570→              </div>
+   571→            </CardContent>
+   572→          </Card>
+   573→
+   574→          <Card className="gap-3 py-4">
+   575→            <CardHeader className="px-4">
+   576→              <CardTitle className="text-sm font-semibold">Volumétrie (requêtes)</CardTitle>
+   577→              <CardDescription className="text-xs">
+   578→                Requêtes traitées, rejetées et en erreur par version.
+   579→              </CardDescription>
+   580→            </CardHeader>
+   581→            <CardContent className="px-2 pb-2">
+   582→              <div className="h-[240px]">
+   583→                <ResponsiveContainer width="100%" height="100%">
+   584→                  <BarChart data={volumeData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+   585→                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
+   586→                    <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
+   587→                    <YAxis
+   588→                      width={56}
+   589→                      tickLine={false}
+   590→                      axisLine={false}
+   591→                      tickFormatter={(v) => formatRequests(Number(v))}
+   592→                    />
+   593→                    <Tooltip
+   594→                      contentStyle={TOOLTIP_STYLE}
+   595→                      labelStyle={TOOLTIP_LABEL_STYLE}
+   596→                      itemStyle={TOOLTIP_ITEM_STYLE}
+   597→                      cursor={{ fill: "rgba(100, 116, 139, 0.08)" }}
+   598→                      formatter={(value, name) => [formatRequests(Number(value)), name]}
+   599→                    />
+   600→                    <Legend iconType="circle" iconSize={9} />
+   601→                    <Bar dataKey="A" name={nameA} fill={CHART_HEX.indigo} radius={[4, 4, 0, 0]} maxBarSize={40} />
+   602→                    <Bar dataKey="B" name={nameB} fill={CHART_HEX.info} radius={[4, 4, 0, 0]} maxBarSize={40} />
+   603→                  </BarChart>
+   604→                </ResponsiveContainer>
+   605→              </div>
+   606→            </CardContent>
+   607→          </Card>
+   608→        </div>
+   609→      </section>
+   610→
+   611→      {/* ---------- Résumé des compromis ---------- */}
+   612→      <section className="mt-10 space-y-3">
+   613→        <h2 className="text-lg font-semibold tracking-tight">Résumé des compromis</h2>
+   614→        <Card className="gap-3 py-4">
+   615→          <CardHeader className="px-5">
+   616→            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+   617→              <Scale className="size-4 text-info" />
+   618→              Lecture des écarts
+   619→            </CardTitle>
+   620→            <CardDescription className="text-xs">
+   621→              Généré à partir des deltas entre les deux versions (seuil de significativité : 3 %).
+   622→            </CardDescription>
+   623→          </CardHeader>
+   624→          <CardContent className="space-y-2 px-5">
+   625→            {summary.map((sentence, index) => (
+   626→              <p
+   627→                key={index}
+   628→                className={
+   629→                  index === summary.length - 1
+   630→                    ? "rounded-lg border bg-muted/40 px-4 py-2.5 text-sm font-medium"
+   631→                    : "text-sm leading-relaxed text-muted-foreground"
+   632→                }
+   633→              >
+   634→                {sentence}
+   635→              </p>
+   636→            ))}
+   637→          </CardContent>
+   638→        </Card>
+   639→      </section>
+   640→    </div>
+   641→  );
+   642→}
+   643→
+   644→/* ============================================================
+   645→ * Vue publique
+   646→ * ============================================================ */
+   647→
+   648→export function CompareView() {
+   649→  const compareA = useAppStore((s) => s.compareA);
+   650→  const compareB = useAppStore((s) => s.compareB);
+   651→
+   652→  if (!compareA || !compareB) {
+   653→    return <CompareSelector />;
+   654→  }
+   655→  return <ComparisonScreen a={compareA} b={compareB} />;
+   656→}
+   657→

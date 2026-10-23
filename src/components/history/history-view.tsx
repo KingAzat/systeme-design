@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  CloudOff,
   Eye,
   GitCompare,
   History as HistoryIcon,
@@ -23,6 +24,9 @@ import { toast } from "sonner";
 import type { SimulationSummary } from "@/types";
 import { useAppStore } from "@/stores/app-store";
 import { storage } from "@/lib/persistence";
+import { RESULT_MODE_LABELS, type ResultMode } from "@/lib/labels";
+import { ERROR_RATE_WARN, P95_WARN_MS } from "@/lib/thresholds";
+import { EmptyState } from "@/components/shared/empty-state";
 import {
   formatCost,
   formatDateTime,
@@ -31,6 +35,11 @@ import {
   formatRps,
   timeAgo,
 } from "@/lib/format";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -66,17 +75,17 @@ import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
 
-function ModeBadge({ mode }: { mode: SimulationSummary["mode"] }) {
+function ModeBadge({ mode }: { mode: ResultMode }) {
   if (mode === "analytical") {
     return (
       <Badge variant="outline" className="border-info/40 bg-info/10 font-normal text-info">
-        Analytique
+        {RESULT_MODE_LABELS.analytical}
       </Badge>
     );
   }
   return (
     <Badge variant="outline" className="border-primary/30 bg-primary/10 font-normal text-primary">
-      Événementielle
+      {RESULT_MODE_LABELS["event-sampled"]}
     </Badge>
   );
 }
@@ -84,8 +93,10 @@ function ModeBadge({ mode }: { mode: SimulationSummary["mode"] }) {
 export function HistoryView() {
   const simulations = useAppStore((s) => s.simulations);
   const simulationsLoading = useAppStore((s) => s.simulationsLoading);
+  const simulationsError = useAppStore((s) => s.simulationsError);
   const refreshSimulations = useAppStore((s) => s.refreshSimulations);
   const architectures = useAppStore((s) => s.architectures);
+  const architecturesLoading = useAppStore((s) => s.architecturesLoading);
   const refreshArchitectures = useAppStore((s) => s.refreshArchitectures);
   const deleteSimulation = useAppStore((s) => s.deleteSimulation);
   const openResult = useAppStore((s) => s.openResult);
@@ -100,12 +111,20 @@ export function HistoryView() {
   const [pendingDelete, setPendingDelete] = useState<SimulationSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Garde !loading (lecture fraîche via getState) : évite de relancer un
+  // chargement déjà en cours — le shell précharge au montage.
   useEffect(() => {
-    if (simulations.length === 0) void refreshSimulations();
+    const s = useAppStore.getState();
+    if (s.simulations.length === 0 && !s.simulationsLoading) {
+      void s.refreshSimulations();
+    }
   }, [simulations.length, refreshSimulations]);
 
   useEffect(() => {
-    if (architectures.length === 0) void refreshArchitectures();
+    const s = useAppStore.getState();
+    if (s.architectures.length === 0 && !s.architecturesLoading) {
+      void s.refreshArchitectures();
+    }
   }, [architectures.length, refreshArchitectures]);
 
   const sorted = useMemo(
@@ -204,7 +223,7 @@ export function HistoryView() {
     }
   };
 
-  const isEmpty = !simulationsLoading && filtered.length === 0;
+  const isEmpty = !simulationsLoading && filtered.length === 0 && !simulationsError;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -251,37 +270,47 @@ export function HistoryView() {
         </header>
 
         {/* ---------- Contenu ---------- */}
-        {simulationsLoading && simulations.length === 0 ? (
+        {simulationsError ? (
+          <div className="mt-8">
+            <Alert variant="destructive" role="alert">
+              <CloudOff aria-hidden />
+              <AlertTitle>Serveur local injoignable</AlertTitle>
+              <AlertDescription>
+                L&apos;historique n&apos;a pas pu être chargé — vos simulations archivées ne
+                sont pas perdues. Réessayez plus tard.
+              </AlertDescription>
+            </Alert>
+          </div>
+        ) : simulationsLoading && simulations.length === 0 ? (
           <div className="mt-8 space-y-2">
             {Array.from({ length: 6 }).map((_, index) => (
               <Skeleton key={index} className="h-14 w-full" />
             ))}
           </div>
         ) : isEmpty ? (
-          <div className="mt-16 flex flex-col items-center justify-center gap-5 text-center">
-            <span className="flex size-16 items-center justify-center rounded-2xl border bg-card shadow-sm">
-              <Inbox className="size-8 text-muted-foreground" />
-            </span>
-            <div className="space-y-1.5">
-              <h2 className="text-lg font-semibold">
-                {filterArchId === "all"
-                  ? "Aucune simulation archivée"
-                  : "Aucune simulation pour cette architecture"}
-              </h2>
-              <p className="mx-auto max-w-md text-sm text-muted-foreground">
-                {filterArchId === "all"
-                  ? "Aucune simulation archivée — lancez votre première simulation depuis l'éditeur."
-                  : "Changez de filtre ou lancez une nouvelle simulation pour cette architecture."}
-              </p>
-            </div>
-            <Button onClick={() => setView("editor")}>
-              <Rocket className="size-4" />
-              Ouvrir l&apos;éditeur
-            </Button>
-          </div>
+          <EmptyState
+            icon={Inbox}
+            className="mt-16"
+            title={
+              filterArchId === "all"
+                ? "Aucune simulation archivée"
+                : "Aucune simulation pour cette architecture"
+            }
+            description={
+              filterArchId === "all"
+                ? "Lancez votre première simulation depuis l'éditeur — elle sera archivée ici automatiquement."
+                : "Changez de filtre ou lancez une nouvelle simulation pour cette architecture."
+            }
+            action={
+              <Button onClick={() => setView("editor")}>
+                <Rocket className="size-4" />
+                Ouvrir l&apos;éditeur
+              </Button>
+            }
+          />
         ) : (
           <>
-            <div className="mt-8 max-h-[70vh] overflow-y-auto rounded-xl border">
+            <div className="mt-8 max-h-[70vh] overflow-x-auto overflow-y-auto rounded-xl border">
               <Table className="min-w-[900px]">
                 <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow className="hover:bg-transparent">
@@ -362,7 +391,9 @@ export function HistoryView() {
                         <TableCell
                           className={cn(
                             "text-right tabular-nums",
-                            sim.overall.p95Ms > 800 ? "font-medium text-warning" : "",
+                            sim.overall.p95Ms > P95_WARN_MS
+                              ? "font-medium text-amber-700 dark:text-amber-400"
+                              : "",
                           )}
                         >
                           {formatMs(sim.overall.p95Ms)}
@@ -370,7 +401,7 @@ export function HistoryView() {
                         <TableCell
                           className={cn(
                             "text-right tabular-nums",
-                            sim.overall.errorRate > 0.02
+                            sim.overall.errorRate > ERROR_RATE_WARN
                               ? "font-medium text-destructive"
                               : "text-muted-foreground",
                           )}

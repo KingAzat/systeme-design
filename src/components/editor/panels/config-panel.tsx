@@ -6,7 +6,7 @@
  * Connexion sélectionnée : protocole, latence, bande passante.
  * Zone sélectionnée : libellé, couleur, dimensions.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CircleHelp,
@@ -30,6 +30,12 @@ import {
 } from "@/lib/format";
 import { estimateArchitecture, type NodeEstimate } from "@/engine";
 import { getComponentById } from "@/data/catalog/registry";
+import { MATURITY_LABELS, PROTOCOL_OPTIONS } from "@/lib/labels";
+import {
+  ERROR_RATE_CRITICAL,
+  UTILIZATION_CRITICAL,
+  UTILIZATION_WARN,
+} from "@/lib/thresholds";
 import { useEditorStore } from "@/stores/editor-store";
 import { useSimulationStore } from "@/stores/simulation-store";
 import type {
@@ -71,17 +77,7 @@ import { CatalogIcon } from "../catalog-icon";
 /* Données statiques                                                   */
 /* ------------------------------------------------------------------ */
 
-const PROTOCOL_OPTIONS: { value: Protocol; label: string }[] = [
-  { value: "http", label: "HTTP" },
-  { value: "https", label: "HTTPS" },
-  { value: "tcp", label: "TCP" },
-  { value: "grpc", label: "gRPC" },
-  { value: "websocket", label: "WebSocket" },
-  { value: "amqp", label: "AMQP" },
-  { value: "kafka", label: "Kafka" },
-  { value: "redis", label: "Redis" },
-  { value: "sql", label: "SQL" },
-];
+/* PROTOCOL_OPTIONS importé de @/lib/labels (source unique des libellés). */
 
 const ZONE_COLOR_OPTIONS: { value: ZoneColor; label: string; dot: string }[] = [
   { value: "indigo", label: "Indigo", dot: "bg-indigo-400" },
@@ -93,8 +89,8 @@ const ZONE_COLOR_OPTIONS: { value: ZoneColor; label: string; dot: string }[] = [
 ];
 
 function utilizationColor(utilization: number): string {
-  if (utilization >= 0.95) return "bg-destructive";
-  if (utilization >= 0.8) return "bg-warning";
+  if (utilization >= UTILIZATION_CRITICAL) return "bg-destructive";
+  if (utilization >= UTILIZATION_WARN) return "bg-warning";
   return "bg-success";
 }
 
@@ -370,9 +366,9 @@ function UtilizationBar({ utilization }: { utilization: number }) {
         aria-label="Utilisation"
         className={cn(
           "h-2",
-          utilization >= 0.95
+          utilization >= UTILIZATION_CRITICAL
             ? "[&_[data-slot=progress-indicator]]:bg-destructive"
-            : utilization >= 0.8
+            : utilization >= UTILIZATION_WARN
               ? "[&_[data-slot=progress-indicator]]:bg-warning"
               : "[&_[data-slot=progress-indicator]]:bg-success",
         )}
@@ -381,10 +377,16 @@ function UtilizationBar({ utilization }: { utilization: number }) {
   );
 }
 
-/** Estimations analytiques, débouncées 300 ms et mémoïsées par graphe. */
+/** Estimations analytiques, débouncées 300 ms et mémoïsées par révision. */
 function useNodeEstimate(nodeId: string): NodeEstimate | null | "pending" {
-  const graphKey = useEditorStore((s) => JSON.stringify([s.nodes, s.edges, s.scenario]));
-  const cache = useRef(new Map<string, NodeEstimate[]>());
+  // `revision` est incrémenté par toute mutation de CONTENU (nodes, edges,
+  // zones, scenario, name) — jamais par la sélection — et setScenario crée un
+  // nouvel objet scenario tout en incrémentant revision : revision seule
+  // couvre donc le recalcul ET la clé de cache. Le sélecteur retourne un
+  // nombre (coût O(1) à chaque set() du store) à la place de l'ancien
+  // JSON.stringify du graphe entier, qui s'exécutait à chaque frame de drag.
+  const revision = useEditorStore((s) => s.revision);
+  const cache = useRef(new Map<number, NodeEstimate[]>());
   const [state, setState] = useState<{ estimate: NodeEstimate | null; ready: boolean }>({
     estimate: null,
     ready: false,
@@ -392,7 +394,7 @@ function useNodeEstimate(nodeId: string): NodeEstimate | null | "pending" {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const cached = cache.current.get(graphKey);
+      const cached = cache.current.get(revision);
       if (cached) {
         setState({ estimate: cached.find((e) => e.nodeId === nodeId) ?? null, ready: true });
         return;
@@ -406,11 +408,11 @@ function useNodeEstimate(nodeId: string): NodeEstimate | null | "pending" {
         scenario: doc.scenario,
       });
       if (cache.current.size > 24) cache.current.clear();
-      cache.current.set(graphKey, computed);
+      cache.current.set(revision, computed);
       setState({ estimate: computed.find((e) => e.nodeId === nodeId) ?? null, ready: true });
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [graphKey, nodeId]);
+  }, [revision, nodeId]);
 
   return state.ready ? state.estimate : "pending";
 }
@@ -639,8 +641,8 @@ function NodePanelHeader({ node }: { node: ArchNode }) {
   );
   const healthy =
     metrics !== undefined &&
-    metrics.utilization < 0.8 &&
-    metrics.errorRate <= 0.05;
+    metrics.utilization < UTILIZATION_WARN &&
+    metrics.errorRate <= ERROR_RATE_CRITICAL;
 
   return (
     <div className="flex items-start gap-2.5">
@@ -662,11 +664,7 @@ function NodePanelHeader({ node }: { node: ArchNode }) {
           )}
           {component && (
             <Badge variant="secondary" className="text-[10px]">
-              {component.maturity === "simulated"
-                ? "Simulé"
-                : component.maturity === "partial"
-                  ? "Partiel"
-                  : "Visuel"}
+              {MATURITY_LABELS[component.maturity]}
             </Badge>
           )}
         </div>
@@ -790,19 +788,28 @@ function NodeConfigPanel({ node }: { node: ArchNode }) {
 /* Panneau connexion                                                   */
 /* ------------------------------------------------------------------ */
 
-function EdgePanel({ edge, nodes }: { edge: ArchEdge; nodes: ArchNode[] }) {
+function EdgePanel({ edge }: { edge: ArchEdge }) {
   const updateEdge = useEditorStore((s) => s.updateEdge);
   const deleteEdge = useEditorStore((s) => s.deleteEdge);
-  const source = nodes.find((n) => n.id === edge.source);
-  const target = nodes.find((n) => n.id === edge.target);
+  // Libellés source/cible : sélecteurs par primitive (string) — le panneau
+  // ne re-render pas lorsqu'un autre nœud change (drag, config…) ; il
+  // re-render seulement si le libellé concerné ou l'arête elle-même change.
+  const sourceLabel = useEditorStore((s) => {
+    const source = s.nodes.find((n) => n.id === edge.source);
+    return source ? source.label : edge.source;
+  });
+  const targetLabel = useEditorStore((s) => {
+    const target = s.nodes.find((n) => n.id === edge.target);
+    return target ? target.label : edge.target;
+  });
 
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <MousePointerClick className="size-3.5" />
-        {source?.label ?? edge.source}
+        {sourceLabel}
         <span aria-hidden>→</span>
-        {target?.label ?? edge.target}
+        {targetLabel}
       </p>
 
       <div className="space-y-1.5">
@@ -971,20 +978,25 @@ export interface ConfigPanelProps {
   onCloseExtra?: () => void;
 }
 
-export function ConfigPanel({ className, onCloseExtra }: ConfigPanelProps) {
-  const selectedNodeId = useEditorStore((s) => s.selectedNodeId);
-  const selectedEdgeId = useEditorStore((s) => s.selectedEdgeId);
+// memo : EditorView est réinscrit à `revision` (brouillon 9-c) et re-render
+// donc à chaque frame de drag — les props du panneau étant stables à ce
+// moment-là (desktop : aucune prop dynamique), le memo coupe la cascade du
+// parent ; les mises à jour réelles passent par les sélecteurs fins ci-dessous.
+export const ConfigPanel = memo(function ConfigPanel({
+  className,
+  onCloseExtra,
+}: ConfigPanelProps) {
+  // Sélecteurs fins identité-stables : le panneau ne re-render que si LE
+  // nœud (ou l'arête) sélectionné change d'identité — pas à chaque frame de
+  // drag d'un autre nœud, ni quand la sélection est simplement absente.
+  const selectedNode = useEditorStore((s) =>
+    s.selectedNodeId ? s.nodes.find((n) => n.id === s.selectedNodeId) ?? null : null,
+  );
+  const selectedEdge = useEditorStore((s) =>
+    s.selectedEdgeId ? s.edges.find((e) => e.id === s.selectedEdgeId) ?? null : null,
+  );
   const selectedZoneId = useEditorStore((s) => s.selectedZoneId);
-  const nodes = useEditorStore((s) => s.nodes);
-  const edges = useEditorStore((s) => s.edges);
   const setConfigOpen = useEditorStore((s) => s.setConfigOpen);
-
-  const selectedNode = selectedNodeId
-    ? nodes.find((n) => n.id === selectedNodeId) ?? null
-    : null;
-  const selectedEdge = selectedEdgeId
-    ? edges.find((e) => e.id === selectedEdgeId) ?? null
-    : null;
 
   const close = () => {
     setConfigOpen(false);
@@ -1036,7 +1048,7 @@ export function ConfigPanel({ className, onCloseExtra }: ConfigPanelProps) {
             <NodeConfigPanel node={selectedNode} />
           </>
         ) : selectedEdge ? (
-          <EdgePanel edge={selectedEdge} nodes={nodes} />
+          <EdgePanel edge={selectedEdge} />
         ) : selectedZoneId ? (
           <ZonePanel zoneId={selectedZoneId} />
         ) : (
@@ -1054,4 +1066,4 @@ export function ConfigPanel({ className, onCloseExtra }: ConfigPanelProps) {
       </div>
     </aside>
   );
-}
+});

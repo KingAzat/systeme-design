@@ -244,3 +244,37 @@
   background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+
+/* ============ Graphiques Recharts (vues résultats & comparaison) ============ */
+/* Anciennement injectés en <style> par results-view/compare-view (CHARTS_CSS)
+ * — règles déplacées ici, sélecteurs déjà scopés sur .sl-charts : les ticks,
+ * axes et légendes suivent les tokens de thème (mode sombre inclus). */
+.sl-charts .recharts-cartesian-axis-tick text {
+  fill: var(--muted-foreground);
+  font-size: 11px;
+}
+.sl-charts .recharts-cartesian-axis-line,
+.sl-charts .recharts-cartesian-axis-tick-line {
+  stroke: var(--border);
+}
+.sl-charts .recharts-legend-item {
+  font-size: 12px;
+}
+.sl-charts .recharts-legend-item-text {
+  color: var(--foreground) !important;
+}
+.sl-charts .recharts-tooltip-wrapper {
+  outline: none;
+}
+
+/* ============ Focus visible sur les éléments SVG interactifs ============ */
+/* Les conteneurs <g> focusables (nœuds de la carte de charge) ne peuvent pas
+ * recevoir les anneaux focus de Tailwind : outline dessiné autour de la
+ * boîte englobante du groupe, piloté par le token --ring. */
+.sl-svg-focus:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.sl-svg-focus:focus {
+  outline: none;
+}

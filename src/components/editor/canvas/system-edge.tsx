@@ -12,20 +12,10 @@ import {
   getBezierPath,
   type EdgeProps,
 } from "@xyflow/react";
-import type { Protocol } from "@/types";
+import { PROTOCOL_LABELS } from "@/lib/labels";
 import type { SystemEdgeType } from "./types";
 
-const PROTOCOL_LABELS: Record<Protocol, string> = {
-  http: "HTTP",
-  https: "HTTPS",
-  tcp: "TCP",
-  grpc: "gRPC",
-  websocket: "WebSocket",
-  amqp: "AMQP",
-  kafka: "Kafka",
-  redis: "Redis",
-  sql: "SQL",
-};
+/* Libellés des protocoles — source unique @/lib/labels. */
 
 function SystemEdgeInner({
   id,
@@ -52,7 +42,9 @@ function SystemEdgeInner({
         path={path}
         markerEnd={markerEnd}
         style={{
-          stroke: selected ? "var(--primary)" : "#94a3b8",
+          // Token d'arête React Flow (défini dans globals.css) : suit le thème
+          // au lieu d'un hex slate clair figé.
+          stroke: selected ? "var(--primary)" : "var(--xy-edge-stroke-default)",
           strokeWidth: 2,
           ...(selected
             ? {

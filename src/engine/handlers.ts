@@ -13,13 +13,18 @@
  * Tout l'aléa passe par ctx.rng (jamais Math.random) : à seed identique, la
  * trajectoire est reproductible.
  */
-import type { Frame, NodeRuntime, SimContext, SimRequest } from "./runtime";
+import type { Frame, NodeRuntime, RouteTargets, SimContext, SimRequest } from "./runtime";
 import {
   DB_CONN_WAIT_TIMEOUT_MS,
+  DRAIN_ITER_CHUNK,
+  DRAIN_SLICE_MS,
   MAX_HOPS,
   QUEUE_ACK_PERSIST_MS,
   SERVER_QUEUE_CAP,
   consumeToken,
+  fifoDequeue,
+  fifoEnqueue,
+  fifoSize,
   trafficProfileFactor,
 } from "./runtime";
 import { hashString } from "./rng";
@@ -70,6 +75,7 @@ function newRequest(
   internal: boolean,
   depth: number,
 ): SimRequest {
+  ctx.requestsCreated++;
   return {
     id: ctx.reqSeq++,
     createdAt: ctx.now,
@@ -92,6 +98,7 @@ function newRequest(
 
 /** Clone « fire-and-forget » d'un fan-out : frames vierges, interne, profondeur bornée. */
 function cloneRequest(ctx: SimContext, req: SimRequest): SimRequest {
+  ctx.requestsCreated++;
   return {
     ...req,
     id: ctx.reqSeq++,
@@ -126,13 +133,8 @@ function forwardTo(
     completeRequest(ctx, req, fromNodeId, false, ERR.loop);
     return false;
   }
-  let edgeLatencyMs = 0;
-  for (const o of ctx.out.get(fromNodeId) ?? []) {
-    if (o.targetId === targetId) {
-      edgeLatencyMs = Math.max(0, o.edge.networkLatencyMs);
-      break;
-    }
-  }
+  // latence d'arête précalculée (première arête vers la cible, comme avant)
+  const edgeLatencyMs = Math.max(0, ctx.nodes.get(fromNodeId)!.outLatencyMs?.get(targetId) ?? 0);
   req.hops++;
   req.networkMs += edgeLatencyMs;
   ctx.heap.push({
@@ -144,7 +146,14 @@ function forwardTo(
   return true;
 }
 
-/** Fan-out générique : la 1re sortie porte la requête, les suivantes des clones internes. */
+/**
+ * Fan-out générique : la 1re sortie porte la requête, les suivantes des clones
+ * internes. Budget global de fan-out : au-delà de `ctx.maxRequests` requêtes
+ * créées, les clones ADDITIONNELS sont abandonnés (compteur de drops) — le
+ * chemin principal (1re sortie) continue toujours. Sans cette garde, un
+ * graphe de proxys en cascade (« persister + publier ») multiplie les requêtes
+ * sans limite (10 sorties × 10 sorties × …) et gèle le navigateur.
+ */
 function forwardFanout(
   ctx: SimContext,
   rt: NodeRuntime,
@@ -156,41 +165,32 @@ function forwardFanout(
     completeRequest(ctx, req, rt.id, true);
     return;
   }
-  for (let i = 0; i < outs.length; i++) {
-    const r = i === 0 ? req : cloneRequest(ctx, req);
+  forwardTo(ctx, req, rt.id, outs[0].targetId, delayMs);
+  for (let i = 1; i < outs.length; i++) {
+    if (ctx.requestsCreated >= ctx.maxRequests) {
+      ctx.fanoutDropped++;
+      continue;
+    }
+    const r = cloneRequest(ctx, req);
     forwardTo(ctx, r, rt.id, outs[i].targetId, delayMs);
   }
 }
 
-/** Cible de routage d'un serveur selon le mix lecture/écriture (même logique que l'estimation). */
-function serverRouteTarget(
-  ctx: SimContext,
-  rt: NodeRuntime,
-  isRead: boolean,
-): { targetId: string | null; fanout: boolean } {
-  const caches: string[] = [];
-  const replicas: string[] = [];
-  const databases: string[] = [];
-  const queues: string[] = [];
-  for (const o of ctx.out.get(rt.id) ?? []) {
-    const t = ctx.nodes.get(o.targetId);
-    if (!t) continue;
-    if (t.role === "cache") caches.push(o.targetId);
-    else if (t.role === "replica") replicas.push(o.targetId);
-    else if (t.role === "database") databases.push(o.targetId);
-    else if (t.role === "queue") queues.push(o.targetId);
-  }
+/** Cible de routage d'un serveur selon le mix lecture/écriture (cibles précalculées). */
+function serverRouteTarget(rt: NodeRuntime, isRead: boolean): { targetId: string | null; fanout: boolean } {
+  const r: RouteTargets | null = rt.routes;
+  if (!r) return { targetId: null, fanout: true };
   if (isRead) {
     // Lectures : cache direct (hit/miss fetch-through) → réplica → base → file.
-    if (caches.length > 0) return { targetId: caches[0], fanout: false };
-    if (replicas.length > 0) return { targetId: replicas[0], fanout: false };
-    if (databases.length > 0) return { targetId: databases[0], fanout: false };
-    if (queues.length > 0) return { targetId: queues[0], fanout: false };
+    if (r.caches.length > 0) return { targetId: r.caches[0], fanout: false };
+    if (r.replicas.length > 0) return { targetId: r.replicas[0], fanout: false };
+    if (r.databases.length > 0) return { targetId: r.databases[0], fanout: false };
+    if (r.queues.length > 0) return { targetId: r.queues[0], fanout: false };
   } else {
     // Écritures : write-around vers la base → file (async) → cache.
-    if (databases.length > 0) return { targetId: databases[0], fanout: false };
-    if (queues.length > 0) return { targetId: queues[0], fanout: false };
-    if (caches.length > 0) return { targetId: caches[0], fanout: false };
+    if (r.databases.length > 0) return { targetId: r.databases[0], fanout: false };
+    if (r.queues.length > 0) return { targetId: r.queues[0], fanout: false };
+    if (r.caches.length > 0) return { targetId: r.caches[0], fanout: false };
   }
   return { targetId: null, fanout: true };
 }
@@ -376,14 +376,19 @@ function tryDrainFifo(ctx: SimContext, rt: NodeRuntime | undefined): void {
   const fifoRoles = rt.role === "server" || rt.role === "cache" || rt.role === "database" || rt.role === "replica" || rt.role === "worker";
   if (!fifoRoles) return;
   const acc = ctx.metrics.acc(rt.id);
-  while (rt.fifo.length > 0 && acc.slotsBusy < rt.slots) {
-    const entry = rt.fifo.shift();
+  const sliceStart = Date.now();
+  let iter = 0;
+  while (fifoSize(rt) > 0 && acc.slotsBusy < rt.slots) {
+    // tranche coopérative : au-delà de 16 ms on rend la main — le reste sera
+    // drainé au prochain événement (ou par le balayage du drain de fin).
+    if ((++iter & (DRAIN_ITER_CHUNK - 1)) === 0 && Date.now() - sliceStart > DRAIN_SLICE_MS) break;
+    const entry = fifoDequeue(rt);
     if (!entry) break;
     const waitMs = Math.max(0, ctx.now - entry.enqueuedAt);
     entry.req.waitMs += waitMs;
     entry.req.legWaitMs = waitMs;
     ctx.metrics.sampleWait(rt.id, waitMs);
-    ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+    ctx.metrics.setQueueLen(rt.id, fifoSize(rt), ctx.now);
     // dépassement du délai d'attente pendant la file
     if (rt.role === "database" && waitMs > DB_CONN_WAIT_TIMEOUT_MS) {
       failRequest(ctx, entry.req, rt.id, ERR.connExhausted);
@@ -400,17 +405,22 @@ function tryDrainFifo(ctx: SimContext, rt: NodeRuntime | undefined): void {
 /** Arrivée sur un nœud à slots : service immédiat ou file d'attente FIFO. */
 function arriveAtSlotNode(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
   const acc = ctx.metrics.acc(rt.id);
-  if (acc.slotsBusy < rt.slots) {
+  // FIFO stricte : un slot libre ne sert une NOUVELLE arrivée que si aucune
+  // attente plus ancienne ne précède (sinon elle « sauterait » la file).
+  if (acc.slotsBusy < rt.slots && fifoSize(rt) === 0) {
     req.legWaitMs = 0;
     startService(ctx, rt, req);
     return;
   }
-  if (rt.fifo.length >= fifoCap(ctx)) {
+  if (fifoSize(rt) >= fifoCap(ctx)) {
     failRequest(ctx, req, rt.id, ERR.queueFull);
     return;
   }
-  rt.fifo.push({ req, enqueuedAt: ctx.now });
-  ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+  fifoEnqueue(rt, { req, enqueuedAt: ctx.now });
+  ctx.metrics.setQueueLen(rt.id, fifoSize(rt), ctx.now);
+  // file non vide + slot libre (état possible après une coupe de tranche) :
+  // on retente immédiatement le drain — sans effet quand les slots sont occupés.
+  tryDrainFifo(ctx, rt);
 }
 
 /* ============================================================
@@ -556,19 +566,24 @@ function allowRate(ctx: SimContext, rt: NodeRuntime): boolean {
 function handleDispatch(ctx: SimContext, rt: NodeRuntime): void {
   if (rt.role !== "queue") return;
   const outs = ctx.out.get(rt.id) ?? [];
+  const sliceStart = Date.now();
+  let iter = 0;
   for (const o of outs) {
     const w = ctx.nodes.get(o.targetId);
     if (!w || w.role !== "worker") continue;
     const acc = ctx.metrics.acc(w.id);
-    while (rt.fifo.length > 0 && acc.slotsBusy < w.slots) {
-      const entry = rt.fifo.shift();
+    while (fifoSize(rt) > 0 && acc.slotsBusy < w.slots) {
+      // tranche coopérative : au-delà de 16 ms on rend la main — le reste
+      // sera redéclenché au prochain événement (kick) ou par le drain de fin.
+      if ((++iter & (DRAIN_ITER_CHUNK - 1)) === 0 && Date.now() - sliceStart > DRAIN_SLICE_MS) return;
+      const entry = fifoDequeue(rt);
       if (!entry) break;
       const waitMs = Math.max(0, ctx.now - entry.enqueuedAt);
       entry.req.waitMs += waitMs;
       entry.req.legWaitMs = waitMs;
       entry.req.preSlotted = true;
       ctx.metrics.sampleWait(rt.id, waitMs);
-      ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+      ctx.metrics.setQueueLen(rt.id, fifoSize(rt), ctx.now);
       const factor = ctx.failure.factor(w.id, ctx.now);
       const proc = Math.max(
         0.05,
@@ -675,7 +690,9 @@ function handleArrival(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void 
         failRequest(ctx, req, rt.id, ERR.noTarget);
         return;
       }
-      const targets = outs.map((o) => o.targetId).filter((id) => ctx.nodes.has(id));
+      // cibles précalculées (ordre des arêtes préservé) — la santé reste
+      // dynamique : les pannes évoluent pendant la simulation.
+      const targets = rt.outTargets ?? [];
       const healthy = rt.rc.healthCheck
         ? targets.filter((id) => ctx.failure.factor(id, ctx.now) > 0)
         : targets;
@@ -741,6 +758,12 @@ function handleArrival(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void 
         const targetId = outs[i].targetId;
         if (!ctx.nodes.has(targetId)) continue;
         if (!breakerAllows(ctx, rt, targetId)) continue; // circuit ouvert pour cette cible
+        // budget fan-out : les clones suivants sont abandonnés, la requête
+        // primaire (1re cible saine) continue toujours.
+        if (primaryUsed && ctx.requestsCreated >= ctx.maxRequests) {
+          ctx.fanoutDropped++;
+          continue;
+        }
         const r = primaryUsed ? cloneRequest(ctx, req) : req;
         r.frames.push({ kind: "breaker", nodeId: rt.id, targetId });
         primaryUsed = true; // la requête primaire est consommée (réussite ou échec)
@@ -817,13 +840,13 @@ function handleArrival(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void 
 function handleQueueArrival(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void {
   ctx.metrics.beginVisit(rt.id, req.isRead, ctx.now);
   const depthCap = Math.max(1, Math.round(rt.rc.maxDepth * ctx.scale));
-  if (rt.fifo.length >= depthCap) {
+  if (fifoSize(rt) >= depthCap) {
     failRequest(ctx, req, rt.id, ERR.queueFullAsync);
     return;
   }
   const msg = newRequest(ctx, req.generatorId, req.isRead, req.sizeKb, true, req.depth + 1);
-  rt.fifo.push({ req: msg, enqueuedAt: ctx.now });
-  ctx.metrics.setQueueLen(rt.id, rt.fifo.length, ctx.now);
+  fifoEnqueue(rt, { req: msg, enqueuedAt: ctx.now });
+  ctx.metrics.setQueueLen(rt.id, fifoSize(rt), ctx.now);
   // acquittement : +2 ms si messages persistants
   const ack = rt.rc.persistMessages ? QUEUE_ACK_PERSIST_MS : 0;
   if (ack > 0) {
@@ -848,7 +871,7 @@ function handleService(ctx: SimContext, rt: NodeRuntime, req: SimRequest): void 
         failRequest(ctx, req, rt.id, ERR.app);
         return;
       }
-      const { targetId, fanout } = serverRouteTarget(ctx, rt, req.isRead);
+      const { targetId, fanout } = serverRouteTarget(rt, req.isRead);
       if (targetId !== null) {
         forwardTo(ctx, req, rt.id, targetId);
         return;
@@ -921,13 +944,19 @@ function completeWorkerMessage(ctx: SimContext, rt: NodeRuntime, req: SimRequest
     // leur résultat aval. Chaque cycle worker → file → worker consomme deux
     // niveaux : la chaîne reste bornée.
     if (req.depth < 3) {
-      const { targetId, fanout } = serverRouteTarget(ctx, rt, false);
-      if (targetId !== null) {
-        const wr = newRequest(ctx, req.generatorId, false, req.sizeKb, true, req.depth + 1);
-        forwardTo(ctx, wr, rt.id, targetId);
-      } else if (fanout) {
-        const wr = newRequest(ctx, req.generatorId, false, req.sizeKb, true, req.depth + 1);
-        forwardFanout(ctx, rt, wr);
+      // budget fan-out : l'effet de bord est abandonné, le verdict du message
+      // (déjà rendu ci-dessus) est préservé.
+      if (ctx.requestsCreated >= ctx.maxRequests) {
+        ctx.fanoutDropped++;
+      } else {
+        const { targetId, fanout } = serverRouteTarget(rt, false);
+        if (targetId !== null) {
+          const wr = newRequest(ctx, req.generatorId, false, req.sizeKb, true, req.depth + 1);
+          forwardTo(ctx, wr, rt.id, targetId);
+        } else if (fanout) {
+          const wr = newRequest(ctx, req.generatorId, false, req.sizeKb, true, req.depth + 1);
+          forwardFanout(ctx, rt, wr);
+        }
       }
     }
   }
@@ -965,4 +994,28 @@ export function processEvent(
       break;
     }
   }
+}
+
+/* ============================================================
+ * Balayage des files (drain de fin)
+ * ============================================================ */
+
+/**
+ * Dernier passage sur chaque nœud : tente de démarrer le service des
+ * entrées restant en file (slots libres) et de dispatcher les messages des
+ * files vers les workers disponibles. Retourne le nombre d'entrées sorties
+ * des files — 0 signifie « plus rien à solder » (les files restantes sont
+ * du vrai lag : workers saturés).
+ */
+export function sweepFifos(ctx: SimContext): number {
+  let moved = 0;
+  for (const id of ctx.order) {
+    const rt = ctx.nodes.get(id);
+    if (!rt) continue;
+    const before = fifoSize(rt);
+    if (rt.role === "queue") handleDispatch(ctx, rt);
+    else tryDrainFifo(ctx, rt);
+    moved += before - fifoSize(rt);
+  }
+  return moved;
 }

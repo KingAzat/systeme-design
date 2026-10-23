@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpDown,
+  CloudOff,
   GitCompare,
   Inbox,
   RefreshCw,
@@ -38,6 +39,13 @@ import {
 } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/shared/empty-state";
+import { RESULT_MODE_PHRASES } from "@/lib/labels";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -51,7 +59,6 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components
 import { MetricRow, type DeltaTone } from "./metric-row";
 import {
   CHART_HEX,
-  CHARTS_CSS,
   GRID_STROKE,
   TOOLTIP_ITEM_STYLE,
   TOOLTIP_LABEL_STYLE,
@@ -208,6 +215,7 @@ function buildTradeoffSummary(a: SimulationResult, b: SimulationResult): string[
 function CompareSelector() {
   const simulations = useAppStore((s) => s.simulations);
   const simulationsLoading = useAppStore((s) => s.simulationsLoading);
+  const simulationsError = useAppStore((s) => s.simulationsError);
   const refreshSimulations = useAppStore((s) => s.refreshSimulations);
   const openCompare = useAppStore((s) => s.openCompare);
   const setView = useAppStore((s) => s.setView);
@@ -218,8 +226,13 @@ function CompareSelector() {
   const [idB, setIdB] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
+  // Garde !loading (lecture fraîche via getState) : évite de relancer un
+  // chargement déjà en cours — le shell précharge au montage.
   useEffect(() => {
-    if (simulations.length === 0) void refreshSimulations();
+    const s = useAppStore.getState();
+    if (s.simulations.length === 0 && !s.simulationsLoading) {
+      void s.refreshSimulations();
+    }
   }, [simulations.length, refreshSimulations]);
 
   const selectedA = simulations.find((s) => s.id === idA);
@@ -312,33 +325,37 @@ function CompareSelector() {
         </div>
       </header>
 
-      {simulations.length === 0 ? (
-        <div className="mt-16 flex flex-col items-center justify-center gap-5 text-center">
-          <span className="flex size-16 items-center justify-center rounded-2xl border bg-card shadow-sm">
-            <Inbox className="size-8 text-muted-foreground" />
-          </span>
-          <div className="space-y-1.5">
-            <h2 className="text-lg font-semibold">Aucune simulation archivée</h2>
-            <p className="mx-auto max-w-md text-sm text-muted-foreground">
-              Lancez au moins deux simulations depuis l&apos;éditeur pour pouvoir les comparer.
-            </p>
+      {simulationsError ? (
+        <div className="mt-16 flex justify-center">
+          <div className="w-full max-w-md">
+            <Alert variant="destructive" role="alert">
+              <CloudOff aria-hidden />
+              <AlertTitle>Serveur local injoignable</AlertTitle>
+              <AlertDescription>
+                Les simulations n&apos;ont pas pu être chargées — vos archives ne sont
+                pas perdues. Réessayez plus tard.
+              </AlertDescription>
+            </Alert>
           </div>
-          <Button onClick={() => setView("editor")}>Ouvrir l&apos;éditeur</Button>
         </div>
+      ) : simulationsLoading && simulations.length === 0 ? (
+        <div className="mt-10 grid gap-6 md:grid-cols-2">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      ) : simulations.length === 0 ? (
+        <EmptyState
+          icon={Inbox}
+          className="mt-16"
+          title="Aucune simulation archivée"
+          description="Lancez au moins deux simulations depuis l'éditeur pour pouvoir les comparer."
+          action={<Button onClick={() => setView("editor")}>Ouvrir l&apos;éditeur</Button>}
+        />
       ) : (
         <>
           <div className="mt-10 grid gap-6 md:grid-cols-2">
-            {simulationsLoading && simulations.length === 0 ? (
-              <>
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-20 w-full" />
-              </>
-            ) : (
-              <>
-                {renderColumn("A")}
-                {renderColumn("B")}
-              </>
-            )}
+            {renderColumn("A")}
+            {renderColumn("B")}
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Button onClick={handleCompare} disabled={!idA || !idB || loading}>
@@ -365,8 +382,9 @@ function CompareSelector() {
  * Écran de comparaison (A et B présents)
  * ============================================================ */
 
+/* Libellé du mode d'exécution — source unique @/lib/labels. */
 function modeLabelShort(mode: SimulationResult["mode"]): string {
-  return mode === "event-sampled" ? "événementielle" : "analytique";
+  return RESULT_MODE_PHRASES[mode];
 }
 
 function truncateName(name: string, max = 20): string {
@@ -431,7 +449,7 @@ function ComparisonScreen({ a, b }: { a: SimulationResult; b: SimulationResult }
 
   return (
     <div className="mx-auto w-full max-w-[1400px] p-6 pb-16">
-      <style>{CHARTS_CSS}</style>
+      {/* Les règles Recharts (.sl-charts) vivent dans globals.css. */}
 
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
@@ -470,7 +488,7 @@ function ComparisonScreen({ a, b }: { a: SimulationResult; b: SimulationResult }
       {/* ---------- Tableau comparatif ---------- */}
       <section className="mt-8 space-y-3">
         <h2 className="text-lg font-semibold tracking-tight">Métriques comparées</h2>
-        <div className="overflow-hidden rounded-xl border">
+        <div className="overflow-x-auto rounded-xl border">
           <Table className="min-w-[680px]">
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -523,7 +541,11 @@ function ComparisonScreen({ a, b }: { a: SimulationResult; b: SimulationResult }
               </CardDescription>
             </CardHeader>
             <CardContent className="px-2 pb-2">
-              <div className="h-[240px]">
+              <div
+                className="h-[240px]"
+                role="img"
+                aria-label="Comparaison des latences par version, en millisecondes : moyenne et percentiles p50, p95 et p99"
+              >
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={latencyData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
@@ -558,7 +580,11 @@ function ComparisonScreen({ a, b }: { a: SimulationResult; b: SimulationResult }
               </CardDescription>
             </CardHeader>
             <CardContent className="px-2 pb-2">
-              <div className="h-[240px]">
+              <div
+                className="h-[240px]"
+                role="img"
+                aria-label="Comparaison de la volumétrie par version, en nombre de requêtes : traitées, rejetées et en erreur"
+              >
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={volumeData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />

@@ -11,6 +11,11 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getCategoryStyle } from "@/lib/icons";
 import { formatNumber, formatRps } from "@/lib/format";
+import {
+  ERROR_RATE_CRITICAL,
+  UTILIZATION_CRITICAL,
+  UTILIZATION_WARN,
+} from "@/lib/thresholds";
 import { useEditorStore } from "@/stores/editor-store";
 import type { CatalogComponent, CatalogField } from "@/types";
 import { NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from "../constants";
@@ -26,12 +31,12 @@ const STATUS_META: Record<NodeStatus, { label: string; dot: string; title: strin
   saturated: {
     label: "Saturated",
     dot: "bg-warning",
-    title: "Saturated : utilisation > 80 % — attentions en forte croissance",
+    title: `Saturated : utilisation ≥ ${Math.round(UTILIZATION_WARN * 100)} % — à surveiller, la charge approche des limites`,
   },
   critical: {
     label: "Critical",
     dot: "bg-destructive",
-    title: "Critical : utilisation > 95 % ou taux d'erreur > 5 %",
+    title: `Critical : utilisation ≥ ${Math.round(UTILIZATION_CRITICAL * 100)} % ou taux d'erreur > ${Math.round(ERROR_RATE_CRITICAL * 100)} %`,
   },
 };
 
@@ -135,4 +140,28 @@ function SystemNodeInner({ id, data, selected }: NodeProps<SystemNodeType>) {
   );
 }
 
-export const SystemNode = memo(SystemNodeInner);
+/**
+ * Comparateur de memo : SystemNodeInner ne consomme QUE `id`, `selected` et
+ * `data` (archNode / component / statut de simulation). Les autres props du
+ * wrapper React Flow (position, dragging, zIndex, dimensions…) sont gérées
+ * par le wrapper lui-même — un changement de position d'un AUTRE nœud (ou une
+ * nouvelle enveloppe `data` recréée à l'identique) ne doit PAS re-render ce
+ * composant. La comparaison par identité d'`archNode` suffit : le store ne
+ * recrée l'objet nœud que lorsque CE nœud change (moveNode/updateNodeConfig/
+ * renameNode/…), et le cache rfNodes du canvas préserve l'enveloppe data des
+ * nœuds inchangés.
+ */
+function systemNodePropsEqual(
+  prev: NodeProps<SystemNodeType>,
+  next: NodeProps<SystemNodeType>,
+): boolean {
+  return (
+    prev.id === next.id &&
+    prev.selected === next.selected &&
+    prev.data?.archNode === next.data?.archNode &&
+    prev.data?.component === next.data?.component &&
+    prev.data?.status === next.data?.status
+  );
+}
+
+export const SystemNode = memo(SystemNodeInner, systemNodePropsEqual);

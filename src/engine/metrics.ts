@@ -68,6 +68,12 @@ export class MetricsStore {
   readonly bucketCount: number;
   readonly bucketSec: number;
   private readonly bucketMs: number;
+  /**
+   * Fin de la fenêtre simulée (ms) : les aires (occupation, files) sont
+   * intégrées JUSQU'À la fenêtre — le drain de fin résout les requêtes en
+   * vol mais ne rallonge pas la fenêtre (sinon utilisation moyenne > 1).
+   */
+  private readonly windowMs: number;
   private readonly accs = new Map<string, NodeAcc>();
 
   /* Compteurs globaux (requêtes clientes, domaine échantillonné).
@@ -87,6 +93,7 @@ export class MetricsStore {
     this.bucketCount = bucketCount;
     this.bucketSec = bucketSec;
     this.bucketMs = bucketSec * 1000;
+    this.windowMs = bucketCount * bucketSec * 1000;
     this.bucketGenerated = new Array<number>(bucketCount).fill(0);
     this.bucketServed = new Array<number>(bucketCount).fill(0);
     this.bucketRejected = new Array<number>(bucketCount).fill(0);
@@ -177,25 +184,27 @@ export class MetricsStore {
 
   /** Intègre l'aire d'occupation depuis la dernière mise à jour, par bucket. */
   private settleBusy(a: NodeAcc, tMs: number): void {
-    if (tMs <= a.lastBusyT) return;
-    const dt = tMs - a.lastBusyT;
+    const t = Math.min(tMs, this.windowMs); // drain de fin : hors fenêtre
+    if (t <= a.lastBusyT) return;
+    const dt = t - a.lastBusyT;
     if (a.slotsBusy > 0) {
       a.slotsBusyAreaMs += dt * a.slotsBusy;
-      this.distribute(a.lastBusyT, tMs, a.slotsBusy, (b, area) => {
+      this.distribute(a.lastBusyT, t, a.slotsBusy, (b, area) => {
         a.bucketBusy[b] += area;
       });
     }
-    a.lastBusyT = tMs;
+    a.lastBusyT = t;
   }
 
   /* --- files --- */
 
   setQueueLen(nodeId: string, len: number, tMs: number): void {
     const a = this.acc(nodeId);
-    if (tMs > a.lastQueueT) {
-      const dt = tMs - a.lastQueueT;
+    const t = Math.min(tMs, this.windowMs); // drain de fin : hors fenêtre
+    if (t > a.lastQueueT) {
+      const dt = t - a.lastQueueT;
       if (a.queueLen > 0) a.queueAreaMs += dt * a.queueLen;
-      a.lastQueueT = tMs;
+      a.lastQueueT = t;
     }
     a.queueLen = len;
     if (len > a.queueLenMax) a.queueLenMax = len;
@@ -399,6 +408,11 @@ export function aggregate(input: AggregateInput): AggregateOutput {
   const k = scale > 0 ? 1 / scale : 1; // facteur de remise à l'échelle
   const nodes: NodeMetrics[] = [];
   const extras = new Map<string, NodeExtra>();
+  // Une seule passe : l'utilisation par nœud (moyenne/max/buckets) est calculée
+  // UNE fois et réutilisée pour les métriques ET le top-5 des séries.
+  const utilEntries: { rt: NodeRuntime; mean: number; max: number; buckets: number[] }[] = [];
+  // Map id → runtime : remplace les runtimes.find() par nœud (boucle goulot).
+  const rtById = new Map<string, NodeRuntime>(runtimes.map((r) => [r.id, r]));
 
   for (const rt of runtimes) {
     const a = store.acc(rt.id);
@@ -406,6 +420,7 @@ export function aggregate(input: AggregateInput): AggregateOutput {
     const capNominal =
       rt.role === "generator" ? UNBOUNDED_RPS : theoreticalCapacityRps(rt.role, rt.rc, readRatio, drain);
     const util = utilizationSeries(rt.role, rt.rc, a, input, capNominal);
+    utilEntries.push({ rt, mean: util.mean, max: util.max, buckets: util.buckets });
 
     const arrivals = a.arrivals * k;
     const processed = a.processed * k;
@@ -502,14 +517,6 @@ export function aggregate(input: AggregateInput): AggregateOutput {
   }
 
   /* utilisation : 5 nœuds les plus utilisés (hors générateurs — ρ≈1 par construction) */
-  const utilEntries: { rt: NodeRuntime; mean: number; max: number; buckets: number[] }[] = [];
-  for (const rt of runtimes) {
-    const a = store.acc(rt.id);
-    const drain = input.workerDrainRps.get(rt.id) ?? 0;
-    const capNominal = rt.role === "generator" ? UNBOUNDED_RPS : theoreticalCapacityRps(rt.role, rt.rc, readRatio, drain);
-    const u = utilizationSeries(rt.role, rt.rc, a, input, capNominal);
-    utilEntries.push({ rt, mean: u.mean, max: u.max, buckets: u.buckets });
-  }
   const utilRanked = utilEntries
     .filter((x) => x.rt.role !== "generator")
     .sort((x, y) => y.max - x.max || x.rt.id.localeCompare(y.rt.id))
@@ -536,7 +543,7 @@ export function aggregate(input: AggregateInput): AggregateOutput {
   let bestUtil = -1;
   let bestQueue = -1;
   for (const nm of nodes) {
-    const rt = runtimes.find((r) => r.id === nm.nodeId);
+    const rt = rtById.get(nm.nodeId);
     if (!rt || rt.role === "generator" || nm.arrivals <= 0) continue;
     if (
       nm.utilization > bestUtil + 1e-9 ||

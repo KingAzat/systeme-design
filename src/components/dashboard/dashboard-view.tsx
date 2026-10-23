@@ -4,6 +4,7 @@ import {
   Activity,
   Boxes,
   Clock,
+  CloudOff,
   Copy,
   Eye,
   FolderOpen,
@@ -34,7 +35,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Card,
   CardAction,
@@ -56,6 +64,7 @@ import { LevelBadge } from "@/components/learn/level-badge";
 import { useLearnedCourses } from "@/components/learn/learned-courses";
 import { useAppStore } from "@/stores/app-store";
 import { storage } from "@/lib/persistence";
+import { RESULT_MODE_LABELS } from "@/lib/labels";
 import {
   formatMs,
   formatPercent,
@@ -73,10 +82,8 @@ import type { ArchitectureSummary } from "@/types";
  * par les actions du store (ou la façade storage pour le renommage).
  */
 
-const MODE_LABELS: Record<string, string> = {
-  analytical: "Analytique",
-  "event-sampled": "Événementiel",
-};
+/* Libellés du mode d'exécution — source unique @/lib/labels. */
+const MODE_LABELS = RESULT_MODE_LABELS;
 
 const QUICK_TEMPLATE_ICONS: Record<string, LucideIcon> = {
   "api-simple": Server,
@@ -87,6 +94,17 @@ const QUICK_TEMPLATE_ICONS: Record<string, LucideIcon> = {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "erreur inconnue";
+}
+
+/** Bandeau d'erreur de chargement (serveur local injoignable). */
+function LoadErrorAlert({ description }: { description: string }) {
+  return (
+    <Alert variant="destructive" role="alert">
+      <CloudOff aria-hidden />
+      <AlertTitle>Serveur local injoignable</AlertTitle>
+      <AlertDescription>{description}</AlertDescription>
+    </Alert>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -119,7 +137,11 @@ function StatCard({
 
 export function DashboardView() {
   const architectures = useAppStore((s) => s.architectures);
+  const architecturesLoading = useAppStore((s) => s.architecturesLoading);
+  const architecturesError = useAppStore((s) => s.architecturesError);
   const simulations = useAppStore((s) => s.simulations);
+  const simulationsLoading = useAppStore((s) => s.simulationsLoading);
+  const simulationsError = useAppStore((s) => s.simulationsError);
   const newArchitecture = useAppStore((s) => s.newArchitecture);
   const openTemplate = useAppStore((s) => s.openTemplate);
   const openArchitecture = useAppStore((s) => s.openArchitecture);
@@ -143,17 +165,16 @@ export function DashboardView() {
   const [deleting, setDeleting] = useState(false);
 
   // Chargement initial : listes vides → refresh auprès de la couche persistence.
+  // Garde !loading : évite de relancer un chargement déjà en cours (le shell
+  // précharge au montage — double fetch sinon). Les erreurs sont gérées dans
+  // le store (toast + champ *Error affiché via LoadErrorAlert).
   useEffect(() => {
     const s = useAppStore.getState();
-    if (s.architectures.length === 0) {
-      void s.refreshArchitectures().catch(() =>
-        toast.error("Impossible de charger vos architectures."),
-      );
+    if (s.architectures.length === 0 && !s.architecturesLoading) {
+      void s.refreshArchitectures();
     }
-    if (s.simulations.length === 0) {
-      void s.refreshSimulations().catch(() =>
-        toast.error("Impossible de charger vos simulations."),
-      );
+    if (s.simulations.length === 0 && !s.simulationsLoading) {
+      void s.refreshSimulations();
     }
   }, []);
 
@@ -334,25 +355,33 @@ export function DashboardView() {
             </CardDescription>
           </CardHeader>
           <CardContent className="px-5">
-            {architectures.length === 0 ? (
-              <div className="py-8 text-center">
-                <span className="mx-auto flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <Boxes className="size-5" />
-                </span>
-                <p className="mt-3 text-sm font-medium">Aucune architecture</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Créez-en une ou partez d&apos;un modèle prêt à simuler.
-                </p>
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <Button size="sm" onClick={() => newArchitecture()}>
-                    <Plus />
-                    Nouvelle architecture
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setView("templates")}>
-                    Explorer les modèles
-                  </Button>
-                </div>
+            {architecturesError ? (
+              <LoadErrorAlert description="Vos architectures n'ont pas pu être chargées — réessayez plus tard. Vos données ne sont pas perdues." />
+            ) : architecturesLoading && architectures.length === 0 ? (
+              // Chargement initial : squelettes plutôt qu'un état vide trompeur.
+              <div className="space-y-2 py-1">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <Skeleton key={index} className="h-12 w-full" />
+                ))}
               </div>
+            ) : architectures.length === 0 ? (
+              <EmptyState
+                icon={Boxes}
+                className="py-8"
+                title="Aucune architecture"
+                description="Créez-en une ou partez d'un modèle prêt à simuler."
+                action={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button size="sm" onClick={() => newArchitecture()}>
+                      <Plus />
+                      Nouvelle architecture
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setView("templates")}>
+                      Explorer les modèles
+                    </Button>
+                  </div>
+                }
+              />
             ) : (
               <div className="max-h-96 overflow-y-auto pr-1">
                 {architectures.map((arch) => (
@@ -372,6 +401,7 @@ export function DashboardView() {
                         variant="ghost"
                         size="icon"
                         title="Ouvrir"
+                        aria-label={`Ouvrir l'architecture « ${arch.name} »`}
                         onClick={() => openArchitecture(arch.id)}
                       >
                         <FolderOpen />
@@ -380,6 +410,7 @@ export function DashboardView() {
                         variant="ghost"
                         size="icon"
                         title="Dupliquer"
+                        aria-label={`Dupliquer l'architecture « ${arch.name} »`}
                         disabled={duplicatingId === arch.id}
                         onClick={() => void handleDuplicate(arch)}
                       >
@@ -393,6 +424,7 @@ export function DashboardView() {
                         variant="ghost"
                         size="icon"
                         title="Renommer"
+                        aria-label={`Renommer l'architecture « ${arch.name} »`}
                         onClick={() => openRename(arch)}
                       >
                         <Pencil />
@@ -401,6 +433,7 @@ export function DashboardView() {
                         variant="ghost"
                         size="icon"
                         title="Supprimer"
+                        aria-label={`Supprimer l'architecture « ${arch.name} »`}
                         className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         onClick={() => setDeleteTarget(arch)}
                       >
@@ -426,16 +459,21 @@ export function DashboardView() {
             </CardAction>
           </CardHeader>
           <CardContent className="px-5">
-            {simulations.length === 0 ? (
-              <div className="py-8 text-center">
-                <span className="mx-auto flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <Activity className="size-5" />
-                </span>
-                <p className="mt-3 text-sm font-medium">Aucune simulation archivée</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Lancez une simulation depuis l&apos;éditeur : elle apparaîtra ici.
-                </p>
+            {simulationsError ? (
+              <LoadErrorAlert description="Vos simulations n'ont pas pu être chargées — réessayez plus tard. Vos archives ne sont pas perdues." />
+            ) : simulationsLoading && simulations.length === 0 ? (
+              <div className="space-y-2 py-1">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <Skeleton key={index} className="h-12 w-full" />
+                ))}
               </div>
+            ) : simulations.length === 0 ? (
+              <EmptyState
+                icon={Activity}
+                className="py-8"
+                title="Aucune simulation archivée"
+                description="Lancez une simulation depuis l'éditeur : elle apparaîtra ici."
+              />
             ) : (
               <div className="max-h-96 overflow-y-auto pr-1">
                 {simulations.slice(0, 8).map((sim) => (
@@ -446,7 +484,7 @@ export function DashboardView() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{sim.architectureName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {MODE_LABELS[sim.mode] ?? sim.mode} · {timeAgo(sim.createdAt)}
+                        {MODE_LABELS[sim.mode]} · {timeAgo(sim.createdAt)}
                       </p>
                     </div>
                     <div className="hidden shrink-0 items-center gap-4 text-sm tabular-nums text-muted-foreground sm:flex">

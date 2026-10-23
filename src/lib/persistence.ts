@@ -42,6 +42,10 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     cache: "no-store",
+    // Timeout par défaut (10 s) : une requête pendante ne bloque jamais
+    // indéfiniment l'UI — l'appelant voit remonter une erreur exploitable.
+    // Un AbortSignal explicite fourni par l'appelant a la priorité.
+    signal: init?.signal ?? AbortSignal.timeout(10_000),
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {

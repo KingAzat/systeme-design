@@ -5,7 +5,7 @@
  * Configuration du scénario (grille de champs), section « Panne simulée »,
  * section « Avancé », bouton de lancement et état de la simulation.
  */
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { memo, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMs, formatPercent, formatRps } from "@/lib/format";
+import { MODE_OPTIONS as SCENARIO_MODE_OPTIONS } from "@/lib/labels";
 import { useEditorStore } from "@/stores/editor-store";
 import { useSimulationStore } from "@/stores/simulation-store";
 import { useAppStore } from "@/stores/app-store";
@@ -62,13 +63,7 @@ const PROFILE_OPTIONS: { value: TrafficProfile; label: string }[] = [
   { value: "random", label: "Aléatoire" },
 ];
 
-const MODE_OPTIONS: { value: SimulationMode; label: string }[] = [
-  { value: "quick", label: "Test rapide" },
-  { value: "load", label: "Test de charge" },
-  { value: "stress", label: "Test de stress" },
-  { value: "endurance", label: "Test d'endurance" },
-  { value: "failure", label: "Test de panne" },
-];
+const MODE_OPTIONS = SCENARIO_MODE_OPTIONS;
 
 function defaultFailure(nodeId: string): FailureScenario {
   return {
@@ -162,9 +157,47 @@ function ScenarioNumberInput({
 /* Barre de simulation                                                 */
 /* ------------------------------------------------------------------ */
 
-export function SimulationBar({ className }: { className?: string }) {
-  const scenario = useEditorStore((s) => s.scenario);
+/**
+ * Menu « Nœud cible » de la panne simulée : seul consommateur de la liste
+ * complète des nœuds. Abonnement LOCAL à s.nodes — le composant n'est monté
+ * que quand la section « Panne simulée » est dépliée avec une panne
+ * configurée, la barre elle-même ne suit plus le tableau des nœuds.
+ */
+function FailureNodeSelect({
+  value,
+  onValueChange,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+}) {
   const nodes = useEditorStore((s) => s.nodes);
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger id="failure-node" className="h-8 w-full" aria-label="Nœud cible de la panne">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {nodes.map((node) => (
+          <SelectItem key={node.id} value={node.id}>
+            {node.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// memo : coupe la cascade de re-render issue du parent (EditorView, réinscrit
+// à `revision`) — la barre ne re-render plus du tout pendant un drag ; ses
+// propres abonnements par valeur décident seuls des mises à jour.
+export const SimulationBar = memo(function SimulationBar({ className }: { className?: string }) {
+  const scenario = useEditorStore((s) => s.scenario);
+  // Abonnements par VALEUR (nombre/chaîne) : la barre ne re-render pas à
+  // chaque frame de drag de nœud (les positions ne changent ni le compte ni
+  // le libellé du premier nœud). Les actions lisent l'état frais via
+  // getState() au moment du clic.
+  const nodeCount = useEditorStore((s) => s.nodes.length);
+  const firstNodeLabel = useEditorStore((s) => s.nodes[0]?.label ?? null);
   const setScenario = useEditorStore((s) => s.setScenario);
   const open = useEditorStore((s) => s.simulationBarOpen);
   const setSimulationBarOpen = useEditorStore((s) => s.setSimulationBarOpen);
@@ -370,8 +403,11 @@ export function SimulationBar({ className }: { className?: string }) {
                 open={failureOpen}
                 onOpenChange={(nextOpen) => {
                   setManualFailureOpen(nextOpen);
-                  if (nextOpen && !scenario.failure && nodes.length > 0) {
-                    setScenario({ failure: defaultFailure(nodes[0].id) });
+                  if (nextOpen && !scenario.failure) {
+                    // État frais au moment de l'ouverture : pas d'abonnement
+                    // au tableau des nœuds pour la barre entière.
+                    const first = useEditorStore.getState().nodes[0];
+                    if (first) setScenario({ failure: defaultFailure(first.id) });
                   }
                 }}
               >
@@ -414,25 +450,10 @@ export function SimulationBar({ className }: { className?: string }) {
                               <Gauge className="size-3.5 text-muted-foreground" />
                               Nœud cible
                             </Label>
-                            <Select
+                            <FailureNodeSelect
                               value={scenario.failure.nodeId}
                               onValueChange={(value) => patchFailure({ nodeId: value })}
-                            >
-                              <SelectTrigger
-                                id="failure-node"
-                                className="h-8 w-full"
-                                aria-label="Nœud cible de la panne"
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {nodes.map((node) => (
-                                  <SelectItem key={node.id} value={node.id}>
-                                    {node.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            />
                           </div>
                           <div className="space-y-1.5">
                             <Label htmlFor="failure-start" className="text-xs font-medium">
@@ -539,18 +560,21 @@ export function SimulationBar({ className }: { className?: string }) {
                             </Button>
                           </div>
                         </>
-                      ) : nodes.length > 0 ? (
+                      ) : nodeCount > 0 ? (
                         <div className="sm:col-span-2 xl:col-span-3">
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             className="h-7 text-xs"
-                            onClick={() =>
-                              setScenario({ failure: defaultFailure(nodes[0].id) })
-                            }
+                            onClick={() => {
+                              const first = useEditorStore.getState().nodes[0];
+                              if (first) {
+                                setScenario({ failure: defaultFailure(first.id) });
+                              }
+                            }}
                           >
-                            Configurer une panne sur « {nodes[0].label} »
+                            Configurer une panne sur « {firstNodeLabel} »
                           </Button>
                         </div>
                       ) : (
@@ -671,67 +695,75 @@ export function SimulationBar({ className }: { className?: string }) {
                   État de la simulation
                 </h4>
 
-                {running ? (
-                  <>
-                    <p className="flex items-start gap-2 text-xs">
-                      <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary" />
-                      <span>
-                        Simulation en cours
-                        {progress
-                          ? ` — ${progress.phase} (${Math.round(progress.progress * 100)} %)`
-                          : ""}
-                      </span>
-                    </p>
-                    <Progress
-                      value={(progress?.progress ?? 0) * 100}
-                      aria-label="Progression de la simulation"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
-                      onClick={abort}
+                {/* Région live : progression, fin, erreur et dernier résultat
+                    sont annoncés aux lecteurs d'écran sans vol de focus.
+                    L'erreur porte en plus role="alert" (annonce immédiate). */}
+                <div aria-live="polite" className="space-y-2.5">
+                  {running ? (
+                    <>
+                      <p className="flex items-start gap-2 text-xs">
+                        <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary" />
+                        <span>
+                          Simulation en cours
+                          {progress
+                            ? ` — ${progress.phase} (${Math.round(progress.progress * 100)} %)`
+                            : ""}
+                        </span>
+                      </p>
+                      <Progress
+                        value={(progress?.progress ?? 0) * 100}
+                        aria-label="Progression de la simulation"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+                        onClick={abort}
+                      >
+                        <Square className="size-3.5" />
+                        Interrompre
+                      </Button>
+                    </>
+                  ) : status === "error" ? (
+                    <p
+                      role="alert"
+                      className="flex items-start gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
                     >
-                      <Square className="size-3.5" />
-                      Interrompre
-                    </Button>
-                  </>
-                ) : status === "error" ? (
-                  <p className="flex items-start gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-                    <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                    {error ?? "La simulation a échoué."}
-                  </p>
-                ) : result ? (
-                  <>
-                    <p className="flex items-start gap-2 text-xs">
-                      <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
-                      <span>
-                        Dernier résultat : {formatRps(result.overall.servedRps)} servis ·
-                        p95 {formatMs(result.overall.p95Ms)}
-                      </span>
+                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                      {error ?? "La simulation a échoué."}
                     </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => useAppStore.getState().openResult(result)}
-                    >
-                      Voir les résultats
-                    </Button>
-                  </>
-                ) : (
-                  <p className="flex items-start gap-2 text-xs text-muted-foreground">
-                    <Info className="mt-0.5 size-3.5 shrink-0 text-info" />
-                    Prêt à lancer la simulation.
-                  </p>
-                )}
+                  ) : result ? (
+                    <>
+                      <p className="flex items-start gap-2 text-xs">
+                        <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
+                        <span>
+                          Dernier résultat : {formatRps(result.overall.servedRps)} servis ·
+                          p95 {formatMs(result.overall.p95Ms)}
+                        </span>
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => useAppStore.getState().openResult(result)}
+                      >
+                        Voir les résultats
+                      </Button>
+                    </>
+                  ) : (
+                    <p className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <Info className="mt-0.5 size-3.5 shrink-0 text-info" />
+                      Prêt à lancer la simulation.
+                    </p>
+                  )}
 
-                {!running && !result && (
-                  <p className="text-xs text-muted-foreground/70">
-                    Aucun résultat pour le moment.
-                  </p>
-                )}
+                  {!running && !result && (
+                    <p className="text-xs text-muted-foreground/70">
+                      Aucun résultat pour le moment.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -739,4 +771,4 @@ export function SimulationBar({ className }: { className?: string }) {
       </div>
     </Collapsible>
   );
-}
+});

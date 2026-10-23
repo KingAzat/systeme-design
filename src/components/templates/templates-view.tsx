@@ -28,13 +28,13 @@ import { useAppStore } from "@/stores/app-store";
 import { getComponentById } from "@/data/catalog/registry";
 import { getCategoryStyle, getIcon } from "@/lib/icons";
 import { formatRps } from "@/lib/format";
+import { MATURITY_LABELS, MODE_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { COURSES } from "@/data/courses";
 import { BIG_TECH_META, TEMPLATES } from "@/data/templates";
 import type {
   ArchitectureTemplate,
   CatalogComponent,
-  SimulationMode,
   SimulationMaturity,
 } from "@/types";
 
@@ -65,25 +65,19 @@ function filterTemplates(family: TemplateFamily): ArchitectureTemplate[] {
   return SORTED_TEMPLATES;
 }
 
-const MODE_LABELS: Record<SimulationMode, string> = {
-  quick: "Rapide",
-  load: "Charge",
-  stress: "Stress",
-  endurance: "Endurance",
-  failure: "Panne",
-};
+/* Libellés des modes — source unique @/lib/labels (MODE_LABELS). */
 
-const MATURITY_STYLES: Record<SimulationMaturity, { label: string; className: string }> = {
-  simulated: { label: "Simulé", className: "border-success/40 bg-success/5 text-success" },
-  partial: { label: "Partiel", className: "border-warning/40 bg-warning/5 text-warning" },
-  visual: { label: "Visuel", className: "text-muted-foreground" },
+const MATURITY_STYLES: Record<SimulationMaturity, { className: string }> = {
+  simulated: { className: "border-success/40 bg-success/5 text-success" },
+  partial: { className: "border-warning/40 bg-warning/5 text-warning" },
+  visual: { className: "text-muted-foreground" },
 };
 
 function MaturityBadge({ maturity }: { maturity: SimulationMaturity }) {
   const style = MATURITY_STYLES[maturity];
   return (
     <Badge variant="outline" className={cn("shrink-0 font-normal", style.className)}>
-      {style.label}
+      {MATURITY_LABELS[maturity]}
     </Badge>
   );
 }

@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
 import {
   CircleX,
+  CloudOff,
   Crosshair,
   GitCompare,
   Home,
@@ -42,6 +43,9 @@ import {
 } from "@/components/ui/tooltip";
 import { launchSimulation } from "../run-simulation";
 
+/** Clé du brouillon local (sessionStorage) — purgée après une sauvegarde réussie. */
+const DRAFT_KEY = "systemlab-draft";
+
 export interface EditorToolbarProps {
   analysis: GraphAnalysis | null;
   /** Desktop : replie/déploie le panneau ; mobile : ouvre le Sheet. */
@@ -69,6 +73,9 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(name);
   const [saving, setSaving] = useState(false);
+  // Échec de la dernière sauvegarde silencieuse (auto-save) : indicateur
+  // persistant tant qu'une nouvelle sauvegarde n'a pas réussi.
+  const [autosaveFailed, setAutosaveFailed] = useState(false);
   const saveInFlight = useRef(false);
 
   /* ----------------------- sauvegarde ----------------------- */
@@ -92,9 +99,23 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
         editor.markSaved(created.id);
       }
       await useAppStore.getState().refreshArchitectures();
+      setAutosaveFailed(false);
+      // Le document est désormais persisté côté serveur : le brouillon local
+      // (sessionStorage) n'a plus de raison d'être.
+      if (typeof window !== "undefined") {
+        try {
+          sessionStorage.removeItem(DRAFT_KEY);
+        } catch {
+          // Stockage indisponible : purge best-effort, sans conséquence.
+        }
+      }
       if (!silent) toast.success("Architecture sauvegardée");
     } catch (error) {
-      if (!silent) {
+      // Auto-save silencieux : AUCUN toast (c'est le rôle de l'indicateur
+      // persistant « Sauvegarde impossible »), mais l'échec doit être visible.
+      if (silent) {
+        setAutosaveFailed(true);
+      } else {
         toast.error(
           error instanceof Error
             ? `Sauvegarde impossible : ${error.message}`
@@ -134,7 +155,7 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
   const issueCount = analysis?.issues.length ?? 0;
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border bg-card px-2 sm:px-3">
+    <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-1.5 gap-y-1 border-b border-border bg-card px-2 sm:px-3">
       <Button
         variant="ghost"
         size="icon"
@@ -146,7 +167,9 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
         <Home className="size-4" />
       </Button>
 
-      <div className="flex min-w-0 items-center gap-1">
+      {/* Plancher de largeur : sur très petit écran, le nom ne s'écrase pas —
+          les actions passent simplement sur une seconde ligne (flex-wrap). */}
+      <div className="flex min-w-[9rem] items-center gap-1">
         {editingName ? (
           <Input
             autoFocus
@@ -179,8 +202,26 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
 
       {/* Indicateurs d'état */}
       <div className="hidden items-center gap-3 border-l border-border pl-3 text-xs md:flex">
+        {autosaveFailed && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+            <span
+              role="status"
+              tabIndex={0}
+              className="flex items-center gap-1.5 font-medium text-destructive"
+            >
+              <CloudOff className="size-3.5" aria-hidden />
+              Sauvegarde impossible
+            </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-72">
+              Le serveur local est injoignable. Nouvel essai automatique à la
+              prochaine modification.
+            </TooltipContent>
+          </Tooltip>
+        )}
         {dirty ? (
-          <span className="flex items-center gap-1.5 font-medium text-warning">
+          <span className="flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-400">
             <span aria-hidden className="size-1.5 rounded-full bg-warning" />
             Modifications non sauvegardées
           </span>

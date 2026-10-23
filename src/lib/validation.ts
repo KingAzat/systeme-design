@@ -44,7 +44,8 @@ export const archNodeSchema = z.object({
   id: z.string().min(1).max(80),
   componentId: z.string().min(1).max(80),
   label: z.string().min(1).max(120),
-  config: z.record(z.string(), configValueSchema),
+  // Clés de config bornées (les clés du catalogue font ≤ 25 caractères)
+  config: z.record(z.string().max(40), configValueSchema),
   position: positionSchema,
   zoneId: z.string().max(80).optional(),
 });
@@ -94,14 +95,18 @@ export const scenarioSchema = z.object({
   failure: failureScenarioSchema.nullable(),
 });
 
-export const architectureDataSchema = z.object({
-  name: z.string().min(1).max(120),
-  description: z.string().max(500).optional(),
-  nodes: z.array(archNodeSchema).max(60, "60 nœuds maximum"),
-  edges: z.array(archEdgeSchema).max(120),
-  zones: z.array(archZoneSchema).max(12),
-  scenario: scenarioSchema,
-});
+export const architectureDataSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    description: z.string().max(500).optional(),
+    nodes: z.array(archNodeSchema).max(60, "60 nœuds maximum"),
+    edges: z.array(archEdgeSchema).max(120),
+    zones: z.array(archZoneSchema).max(12),
+    scenario: scenarioSchema,
+  })
+  .refine((d) => JSON.stringify(d).length < 512_000, {
+    message: "Architecture trop volumineuse",
+  });
 
 export const createArchitectureSchema = z.object({
   name: z.string().min(1).max(120),
@@ -115,6 +120,25 @@ export const updateArchitectureSchema = z.object({
   data: architectureDataSchema.optional(),
 });
 
+/** Résumé `overall` d'un résultat de simulation (contrôle structurel minimal). */
+export const simulationOverallSummarySchema = z
+  .object({
+    servedRps: z.number().finite(),
+    p95Ms: z.number().finite(),
+    errorRate: z.number().finite(),
+    availability: z.number().finite(),
+    costPerMonthUsd: z.number().finite(),
+  })
+  .passthrough();
+
+/** Résultat de simulation — structure minimale (overall obligatoire), reste libre. */
+export const simulationResultSchema = z
+  .object({
+    overall: simulationOverallSummarySchema,
+  })
+  .passthrough()
+  .refine((r) => JSON.stringify(r).length < 2_000_000, "Résultat trop volumineux");
+
 export const createSimulationSchema = z.object({
   architectureId: z.string().min(1),
   label: z.string().max(120).optional(),
@@ -122,11 +146,8 @@ export const createSimulationSchema = z.object({
   mode: z.enum(["analytical", "event-sampled"]),
   seed: z.number().int().min(0).max(2_147_483_647),
   scenario: scenarioSchema,
-  /** Résultat complet — validé comme objet opaque mais borné */
-  result: z.record(z.string(), z.unknown()).refine(
-    (r) => JSON.stringify(r).length < 2_000_000,
-    "Résultat trop volumineux",
-  ),
+  /** Résultat complet — structurellement validé (overall) et borné */
+  result: simulationResultSchema,
 });
 
 export type CreateArchitectureInput = z.infer<typeof createArchitectureSchema>;

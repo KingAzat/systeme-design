@@ -30,18 +30,55 @@ interruptible).
   total déterministe, aucune boucle infinie possible.
 - **Horloge virtuelle** : `ctx.now` avance événement par événement jusqu'à
   `durationSec`.
+- **Drain de fin de fenêtre** : après la boucle principale (coupe à
+  `durationMs`), une phase de drain **résout les requêtes en vol** — services
+  en cours, routages intermédiaires, files non vides — pour que `inFlight`
+  retombe à 0 et que l'invariant « arrivées ≈ traités + rejets + erreurs »
+  soit tenu (vérifié sur les 17 modèles : résidu client = 0). Garde-fous :
+  (a) les événements de génération au-delà de `durationMs` sont ignorés (aucune
+  nouvelle arrivée externe) ; (b) cap de temps virtuel à 1,5 × durée — les
+  événements au-delà sont abandonnés ; (c) cap de temps réel de 1 500 ms pour
+  toute la phase ; un balayage final des files couvre les drains internes
+  coupés par leur tranche coopérative. Les requêtes client non soldées malgré
+  le drain (`cutInFlight`) donnent une hypothèse « N requêtes encore en vol à
+  la fin de la fenêtre ont été tronquées », et la règle « lag de file »
+  n'utilise alors plus la profondeur résiduelle finale (non fiable) — seuls
+  les signaux fondés sur le max et les séries restent. Les aires
+  (utilisation/files) sont intégrées jusqu'à la fenêtre seulement : le drain
+  résout, il ne rallonge pas la fenêtre simulée.
 - **Reproductibilité** : tout l'aléa passe par un PRNG seedé (mulberry32 +
   gaussienne Box-Muller, `rng.ts`). À seed et paramètres identiques →
   résultats strictement identiques (vérifié). `Date.now()` n'entre que dans
-  `startedAt`/`computeMs`.
+  `startedAt`/`computeMs` — à l'exception près de la soupape des drains
+  internes (voir ci-dessous), qui ne se déclenche que sur des graphes
+  pathologiques. `onProgress` est protégé par try/catch : un callback
+  défaillant n'interrompt jamais la simulation.
 
-## Échantillonnage
+## Échantillonnage et budget de fan-out
 
 `rps × durée > 100 000` ⇒ `samplingRate = 100 000 / (rps × durée)`. On simule
 une fraction des requêtes ; **compteurs et volumes** sont remis à l'échelle
 (× 1/samplingRate) ; **latences et files** restent des observations par
 requête (hypothèse documentée). Le résultat affiche `requestsSimulated`,
 `samplingRate` et un badge « échantillonnage N % ».
+
+L'échantillonnage ne borne que les **arrivées externes**. Les **clones internes**
+du fan-out (proxy « persister + publier », fetch-through de cache, effets de
+bord des workers, clones de circuit breaker) multiplient chaque requête par le
+nombre de sorties à chaque étage — un graphe adverse de proxys en cascade peut
+générer des dizaines de millions d'événements et geler le navigateur. Le moteur
+applique donc un **budget global de création** :
+
+- `MAX_TOTAL_REQUESTS = 1 200 000` requêtes créées au total (externes + clones +
+  messages + effets de bord) — valeur `max(1 200 000, 2,5 × maximum observé sur
+  les 17 modèles)` ; le maximum mesuré est 214 766 (WhatsApp) → 1 200 000 ;
+- au-delà, les **clones additionnels ne sont pas créés** (compteur de drops) :
+  le chemin principal de chaque requête continue toujours (1re sortie du
+  fan-out, requête primaire du breaker, verdict déjà rendu d'un worker) ;
+- un clamp pédagogique « fan-out tronqué : N clones abandonnés » est émis dans
+  les diagnostics, et l'hypothèse « Budget de fan-out » est listée avec les
+  résultats. Vérifié : un graphe adverse (3 étages de proxys à 10 sorties)
+  termine en ~1,1 s avec 294 761 clones abandonnés au lieu d'exploser.
 
 ## Cycle de vie d'une requête
 
@@ -62,6 +99,31 @@ générateur (Poisson, profil de trafic)
   le déroulement LIFO libère exactement ce qui a été réservé.
 - **Protection anti-cycle** : `MAX_HOPS = 10` au-delà → erreur « boucle
   détectée » + diagnostic.
+- **Routage mono-cible (hypothèse)** : un serveur (ou un worker) relié à N
+  caches / N bases / N files n'envoie chaque requête que vers le **PREMIER**
+  d'entre eux — `caches[0]`, `databases[0]`, `queues[0]` selon le mix
+  lecture/écriture (`serverRouteTarget`). Pas de répartition entre cibles
+  multiples d'un même rôle, ni de parallélisation des appels aval : seuls les
+  proxys / pass-through / CDN / rate-limiters font un vrai fan-out (clones
+  internes fire-and-forget). Pour répartir, on passe par un Load Balancer.
+- **Erreurs applicatives (hypothèse)** : le taux d'erreur effectif d'un serveur
+  est la **somme** du taux du composant et du taux de base du scénario
+  (`errorRate + baseErrorRate`, plafonné à 100 %) — les deux sources
+  s'additionnent, elles ne se composent pas multiplicativement.
+- **Files FIFO O(1)** : défilement par indice de tête (`fifoHead`) avec
+  compaction amortie (si la tête dépasse 512 ET la moitié du tableau, le
+  préfixe consommé est retiré d'un coup) — remplace les `Array.shift()` O(n²)
+  des files profondes ; l'ordre FIFO est strictement préservé (une arrivée ne
+  saute jamais une attente plus ancienne).
+- **Cibles de routage précalculées** : listes aval par rôle (serveurs), cibles
+  du balancer et latences d'arête sont calculées une fois à l'initialisation
+  (l'ordre des arêtes est préservé → déterminisme inchangé) ; la santé des
+  cibles du balancer reste évaluée dynamiquement (les pannes évoluent).
+- **Drains internes coopératifs** : `tryDrainFifo` et `handleDispatch`
+  vérifient le temps écoulé toutes les 256 itérations et rendent la main au-delà
+  de 16 ms — le reste est redéclenché au prochain événement (kick) ou soldé
+  par le drain de fin. Exception documentée à la reproductibilité : sur un
+  graphe pathologique, cette soupape dépend du temps réel.
 
 ## Modèles par rôle (`handlers.ts`)
 
@@ -75,7 +137,7 @@ générateur (Poisson, profil de trafic)
 | `cache` | hit/miss tiré à l'arrivée ; miss → fetch-through vers SA base aval |
 | `database` | sémaphore `maxConnections` (attente > 1 s → « connexions épuisées ») ; lecture `avgReadMs` (× 0,6 si cache interne) / écriture `avgWriteMs` |
 | `replica` | lectures uniquement, capacité × instances, `replicationLagMs` documenté |
-| `queue` | profondeur ≤ `maxDepth`, +2 ms si persistance ; workers aval dépilement selon disponibilité |
+| `queue` | profondeur ≤ `maxDepth` (bornes 1–10 000, clamp avec diagnostic si configuré hors bornes ; défauts de catalogue hors bornes normalisés silencieusement), +2 ms si persistance ; workers aval dépilement selon disponibilité |
 | `worker` | `avgProcessingMs` lognormal (var 0,3) ; erreurs async (la requête émettrice est déjà servie 202) ; écriture aval bornée en profondeur |
 | `circuit-breaker` | fenêtre glissante par cible (`minRequestsToTrip`, `errorThreshold`) → OPEN `cooldownMs` (échec immédiat, aval épargné) → HALF-OPEN (`halfOpenProbes`) → CLOSED |
 | `proxy`/`storage` | latence + capacité (rejet 503) |
@@ -100,6 +162,9 @@ circuit breakers qui s'ouvrent, Load Balancers avec health checks qui basculent
   rôles à débit → arrivées / capacité ; **générateurs → 0** (une source de
   trafic n'est pas une ressource saturable) ; files → profondeur / maxDepth.
 - **Goulot** : nœud non-générateur à l'utilisation maximale (tie-break file max).
+- **Agrégation une seule passe** : `utilizationSeries` est calculé une fois
+  par nœud (réutilisé pour les métriques ET le top-5 des séries) et les
+  recherches id → runtime passent par une `Map` construite une fois.
 
 ## Coûts (`cost.ts`)
 
@@ -118,6 +183,10 @@ efficace (< 50 % de hit), épuisement de connexions, cascade de timeouts
 (p95 aval > timeout amont), composant isolé (hors observabilité — déconnectés
 par nature), rejets du rate limiter, circuit breaker ouvert, lag de file,
 goulot principal, disponibilité < 99 %, cycles/clampés/composants visuels (info).
+Le « lag de file » distingue la profondeur résiduelle finale (signal fort :
+les workers ne suivent pas) de la simple sollicitation maximale (info) ; si des
+requêtes ont été tronquées à la coupe (`cutInFlight`), seule la variante fondée
+sur le max peut se déclencher.
 
 ## Limites documentées (extrait des hypothèses affichées)
 
@@ -128,3 +197,12 @@ goulot principal, disponibilité < 99 %, cycles/clampés/composants visuels (inf
 5. Latences et files non remises à l'échelle sous échantillonnage
    (observations par requête).
 6. Composants « visuels » : neutres (aucun effet).
+7. Budget de fan-out : 1 200 000 requêtes créées au total, clones abandonnés
+   au-delà (chemin principal préservé, clamp « fan-out tronqué »).
+8. Routage mono-cible : un serveur n'envoie que vers le premier cache / la
+   première base / la première file de chaque rôle.
+9. Erreurs serveur = `errorRate` composant + `baseErrorRate` scénario
+   (addition, plafonnée à 100 %).
+10. Bornes moteur : `maxDepth` et `maxConnections` ∈ [1, 10 000] (les défauts
+    de catalogue au-delà — ex. Kafka 1 000 000 — sont normalisés
+    silencieusement ; une valeur configurée hors bornes produit un clamp).

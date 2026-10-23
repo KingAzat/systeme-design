@@ -5,10 +5,17 @@
  * surligné, ligne sélectionnée synchronisée avec la carte de charge).
  */
 import { useMemo, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { NodeMetrics } from "@/types";
 import { getComponentById } from "@/data/catalog";
 import { getCategoryStyle, getIcon } from "@/lib/icons";
 import { formatCost, formatMs, formatNumber, formatPercent, formatRps } from "@/lib/format";
+import {
+  ERROR_RATE_CRITICAL,
+  ERROR_RATE_WARN,
+  UTILIZATION_CRITICAL,
+  UTILIZATION_WARN,
+} from "@/lib/thresholds";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -45,10 +52,14 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "costPerMonthUsd", label: "Coût", numeric: true },
 ];
 
-function utilColorHex(u: number): string {
-  if (u >= 0.85) return "#DC2626";
-  if (u >= 0.6) return "#D97706";
-  return "#16A34A";
+/**
+ * Couleur de la barre d'utilisation — tokens CSS (var(--…)) : suit le thème
+ * sombre, contrairement aux hex en dur qui restaient clairs en dark.
+ */
+function utilColorVar(u: number): string {
+  if (u >= UTILIZATION_CRITICAL) return "var(--destructive)";
+  if (u >= UTILIZATION_WARN) return "var(--warning)";
+  return "var(--success)";
 }
 
 export interface NodeMetricsTableProps {
@@ -91,7 +102,7 @@ export function NodeMetricsTable({
   };
 
   return (
-    <div className="max-h-96 overflow-y-auto rounded-lg border">
+    <div className="max-h-96 overflow-x-auto overflow-y-auto rounded-lg border">
       <Table className="min-w-[820px]">
         <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow className="hover:bg-transparent">
@@ -129,12 +140,22 @@ export function NodeMetricsTable({
             const categoryStyle = getCategoryStyle(component?.category ?? "");
             const isBottleneck = bottleneckNodeId === m.nodeId;
             const isSelected = selectedNodeId === m.nodeId;
+            const toggleSelection = () => onSelectNode(isSelected ? null : m.nodeId);
+            const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                toggleSelection();
+              }
+            };
             return (
               <TableRow
                 key={m.nodeId}
-                onClick={() => onSelectNode(isSelected ? null : m.nodeId)}
+                tabIndex={0}
+                aria-label={`${m.label} — utilisation ${formatPercent(m.utilization, 0)} — sélectionner pour mettre en évidence`}
+                onClick={toggleSelection}
+                onKeyDown={handleRowKeyDown}
                 className={cn(
-                  "cursor-pointer",
+                  "cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
                   isBottleneck && "bg-warning/10",
                   isSelected && "bg-accent/50",
                 )}
@@ -174,10 +195,10 @@ export function NodeMetricsTable({
                 <TableCell
                   className={cn(
                     "text-right tabular-nums",
-                    m.errorRate > 0.05
+                    m.errorRate > ERROR_RATE_CRITICAL
                       ? "font-medium text-destructive"
-                      : m.errorRate > 0.02
-                        ? "text-warning"
+                      : m.errorRate > ERROR_RATE_WARN
+                        ? "font-medium text-amber-700 dark:text-amber-400"
                         : "text-muted-foreground",
                   )}
                 >
@@ -190,7 +211,7 @@ export function NodeMetricsTable({
                         className="h-full rounded-full"
                         style={{
                           width: `${Math.min(100, Math.max(0, m.utilization * 100))}%`,
-                          backgroundColor: utilColorHex(m.utilization),
+                          backgroundColor: utilColorVar(m.utilization),
                         }}
                       />
                     </div>

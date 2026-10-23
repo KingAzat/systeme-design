@@ -9,6 +9,11 @@
  */
 import type { Edge, Node } from "@xyflow/react";
 import type { ArchEdge, ArchNode, ArchZone, CatalogComponent } from "@/types";
+import {
+  ERROR_RATE_CRITICAL,
+  UTILIZATION_CRITICAL,
+  UTILIZATION_WARN,
+} from "@/lib/thresholds";
 
 /** Statut dérivé des métriques simulées (badge du nœud). */
 export type NodeStatus = "healthy" | "saturated" | "critical";
@@ -36,12 +41,14 @@ export type SystemEdgeType = Edge<SystemEdgeData, "system">;
 export type AppNode = SystemNodeType | ZoneNodeType;
 export type AppEdge = SystemEdgeType;
 
-/** Statut d'un nœud à partir de ses métriques simulées. */
+/** Statut d'un nœud à partir de ses métriques simulées (seuils unifiés). */
 export function nodeStatusFromMetrics(
   utilization: number,
   errorRate: number,
 ): NodeStatus {
-  if (utilization >= 0.95 || errorRate > 0.05) return "critical";
-  if (utilization >= 0.8) return "saturated";
+  if (utilization >= UTILIZATION_CRITICAL || errorRate > ERROR_RATE_CRITICAL) {
+    return "critical";
+  }
+  if (utilization >= UTILIZATION_WARN) return "saturated";
   return "healthy";
 }

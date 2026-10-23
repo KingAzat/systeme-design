@@ -48,11 +48,14 @@ function ChartCard({
   title,
   description,
   empty,
+  imgLabel,
   children,
 }: {
   title: string;
   description: string;
   empty?: string;
+  /** Alternative textuelle du graphique (role="img"), en français. */
+  imgLabel: string;
   children: ReactNode;
 }) {
   return (
@@ -63,11 +66,17 @@ function ChartCard({
       </CardHeader>
       <CardContent className="px-2 pb-2">
         {empty ? (
-          <div className="flex h-[240px] items-center justify-center text-center text-sm text-muted-foreground">
+          <div
+            className="flex h-[240px] items-center justify-center text-center text-sm text-muted-foreground"
+            role="img"
+            aria-label={`${imgLabel} — aucune donnée pour cette simulation`}
+          >
             {empty}
           </div>
         ) : (
-          <div className="h-[240px]">{children}</div>
+          <div className="h-[240px]" role="img" aria-label={imgLabel}>
+            {children}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -93,6 +102,7 @@ export function ResultsCharts({ series, nodeLabels }: ResultsChartsProps) {
       <ChartCard
         title="Débit (req/s)"
         description="Trafic entrant, servi et rejeté au fil du temps simulé."
+        imgLabel="Débit au fil du temps simulé, en requêtes par seconde : trafic entrant, trafic servi et trafic rejeté"
         empty={series.throughput.length === 0 ? "Aucune donnée de débit." : undefined}
       >
         <ResponsiveContainer width="100%" height="100%">
@@ -156,6 +166,7 @@ export function ResultsCharts({ series, nodeLabels }: ResultsChartsProps) {
       <ChartCard
         title="Latence de bout en bout (ms)"
         description="Latence moyenne et p95 par intervalle simulé (p95 en pointillés)."
+        imgLabel="Latence de bout en bout au fil du temps simulé, en millisecondes : moyenne et p95"
         empty={series.latency.length === 0 ? "Aucune donnée de latence." : undefined}
       >
         <ResponsiveContainer width="100%" height="100%">
@@ -208,6 +219,7 @@ export function ResultsCharts({ series, nodeLabels }: ResultsChartsProps) {
       <ChartCard
         title="Erreurs et rejets (requêtes)"
         description="Volumes cumulés par intervalle : requêtes en erreur et requêtes rejetées."
+        imgLabel="Erreurs et rejets par intervalle de temps simulé, en nombre de requêtes"
         empty={series.errors.length === 0 ? "Aucune erreur ni rejet observé." : undefined}
       >
         <ResponsiveContainer width="100%" height="100%">
@@ -260,6 +272,9 @@ export function ResultsCharts({ series, nodeLabels }: ResultsChartsProps) {
       <ChartCard
         title="Files d'attente (longueur)"
         description="Longueur de file des nœuds les plus sollicités (5 max)."
+        imgLabel={`Files d'attente au fil du temps simulé pour les cinq composants les plus chargés${
+          queueKeys.length > 0 ? ` : ${queueKeys.map(labelOf).join(", ")}` : ""
+        }`}
         empty={
           queueKeys.length === 0
             ? "Aucune file d'attente observée — les nœuds absorbent la charge."
@@ -312,6 +327,9 @@ export function ResultsCharts({ series, nodeLabels }: ResultsChartsProps) {
       <ChartCard
         title="Utilisation par nœud (%)"
         description="Fraction de capacité utilisée pour les nœuds les plus chargés (hors générateurs)."
+        imgLabel={`Utilisation au fil du temps simulé des cinq composants les plus chargés, en pourcentage de leur capacité${
+          utilKeys.length > 0 ? ` : ${utilKeys.map(labelOf).join(", ")}` : ""
+        }`}
         empty={
           utilKeys.length === 0
             ? "Aucune donnée d'utilisation disponible."

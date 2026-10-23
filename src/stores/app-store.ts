@@ -6,6 +6,7 @@
  * simulation-store. Ce store gère la vue active et les passerelles inter-vues.
  */
 import { create } from "zustand";
+import { toast } from "sonner";
 import type {
   AppView,
   ArchitectureData,
@@ -37,8 +38,12 @@ interface AppState {
 
   architectures: ArchitectureSummary[];
   architecturesLoading: boolean;
+  /** Message d'erreur du dernier refresh échoué (null = aucune erreur). */
+  architecturesError: string | null;
   simulations: SimulationSummary[];
   simulationsLoading: boolean;
+  /** Message d'erreur du dernier refresh échoué (null = aucune erreur). */
+  simulationsError: string | null;
 
   setView: (view: AppView) => void;
   goBack: () => void;
@@ -71,8 +76,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   architectures: [],
   architecturesLoading: false,
+  architecturesError: null,
   simulations: [],
   simulationsLoading: false,
+  simulationsError: null,
 
   setView: (view) => {
     const { activeView } = get();
@@ -125,20 +132,36 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   refreshArchitectures: async () => {
-    set({ architecturesLoading: true });
+    set({ architecturesLoading: true, architecturesError: null });
     try {
       const items = await storage.architectures.list();
-      set({ architectures: items });
+      set({ architectures: items, architecturesError: null });
+    } catch (error) {
+      set({
+        architecturesError: error instanceof Error ? error.message : "Erreur inconnue.",
+      });
+      toast.error("Impossible de charger vos données", {
+        description: "Le serveur local est injoignable. Réessayez plus tard.",
+        id: "refresh-error", // id fixe : déduplication sonner entre listes et vues
+      });
     } finally {
       set({ architecturesLoading: false });
     }
   },
 
   refreshSimulations: async () => {
-    set({ simulationsLoading: true });
+    set({ simulationsLoading: true, simulationsError: null });
     try {
       const items = await storage.simulations.list(undefined, 100);
-      set({ simulations: items });
+      set({ simulations: items, simulationsError: null });
+    } catch (error) {
+      set({
+        simulationsError: error instanceof Error ? error.message : "Erreur inconnue.",
+      });
+      toast.error("Impossible de charger vos données", {
+        description: "Le serveur local est injoignable. Réessayez plus tard.",
+        id: "refresh-error", // id fixe : déduplication sonner entre listes et vues
+      });
     } finally {
       set({ simulationsLoading: false });
     }

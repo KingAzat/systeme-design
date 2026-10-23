@@ -45,6 +45,7 @@ import {
 import { useAppStore } from "@/stores/app-store";
 import { storage } from "@/lib/persistence";
 import { cn } from "@/lib/utils";
+import { MODE_LABELS } from "@/lib/labels";
 import { DEFAULT_SCENARIO } from "@/data/templates";
 import type { Architecture, ArchitectureData, SimulationMode } from "@/types";
 
@@ -72,12 +73,13 @@ const DEFAULT_PREFS: SimulationPreferences = {
   mode: DEFAULT_SCENARIO.mode,
 };
 
+/* Libellés des modes — source unique @/lib/labels (MODE_LABELS, forme courte). */
 const MODE_OPTIONS: { value: SimulationMode; label: string; hint: string }[] = [
-  { value: "quick", label: "Rapide", hint: "Vérification ponctuelle" },
-  { value: "load", label: "Charge", hint: "Débit nominal soutenu" },
-  { value: "stress", label: "Stress", hint: "Recherche des limites" },
-  { value: "endurance", label: "Endurance", hint: "Stabilité dans la durée" },
-  { value: "failure", label: "Panne", hint: "Défaillance injectée" },
+  { value: "quick", label: MODE_LABELS.quick, hint: "Vérification ponctuelle" },
+  { value: "load", label: MODE_LABELS.load, hint: "Débit nominal soutenu" },
+  { value: "stress", label: MODE_LABELS.stress, hint: "Recherche des limites" },
+  { value: "endurance", label: MODE_LABELS.endurance, hint: "Stabilité dans la durée" },
+  { value: "failure", label: MODE_LABELS.failure, hint: "Défaillance injectée" },
 ];
 
 const THEME_OPTIONS = [
@@ -224,25 +226,34 @@ export function SettingsView() {
         throw new Error("format de fichier inattendu (tableau « architectures » attendu)");
       }
       let count = 0;
-      for (const item of list) {
-        if (!isValidArchitecture(item)) continue;
-        const data: ArchitectureData = {
-          name: item.name,
-          description: item.description ?? undefined,
-          nodes: item.nodes,
-          edges: item.edges,
-          zones: item.zones,
-          scenario: item.scenario,
-        };
-        await storage.architectures.create(data);
-        count += 1;
-      }
+      // Créations en parallèle (allSettled) : un échec partiel n'annule pas
+      // l'import des autres architectures.
+      const valid = list.filter(isValidArchitecture);
+      const settled = await Promise.allSettled(
+        valid.map((item) =>
+          storage.architectures.create({
+            name: item.name,
+            description: item.description ?? undefined,
+            nodes: item.nodes,
+            edges: item.edges,
+            zones: item.zones,
+            scenario: item.scenario,
+          }),
+        ),
+      );
+      count = settled.filter((r) => r.status === "fulfilled").length;
+      const failures = settled.length - count;
       await refreshArchitectures();
       await refreshSimulations();
       if (count > 0) {
         toast.success(`${count} architecture(s) importée(s).`);
       } else {
         toast.info("Aucune architecture valide dans ce fichier.");
+      }
+      if (failures > 0) {
+        toast.warning(`${failures} architecture(s) en échec à l'import.`, {
+          description: "Vérifiez le format du fichier et réessayez pour les entrées concernées.",
+        });
       }
     } catch (err) {
       toast.error(`Import impossible : ${errorMessage(err)}`);
@@ -296,6 +307,7 @@ export function SettingsView() {
                   <button
                     key={value}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => setTheme(value)}
                     className={cn(
                       "flex flex-col items-center gap-1.5 rounded-lg border p-4 text-center transition-colors hover:bg-accent/50",

@@ -40,6 +40,9 @@ export interface DiagnosticsInput {
   loopKilled: number;
   /** Messages de clampage (nœuds tronqués, durée/rps ajustés…). */
   clamps: string[];
+  /** Requêtes clientes non soldées à la fin (drain borné) — profondeur
+   *  finale NON fiable pour le signal « lag de file » (faux positif possible). */
+  cutInFlight: number;
 }
 
 /* ============================================================
@@ -724,8 +727,12 @@ const ruleQueueLag: Rule = (c) => {
   const out: Diagnostic[] = [];
   for (const e of c.byId.values()) {
     if (e.rt.role !== "queue" || e.nm.arrivals <= 0) continue;
-    const end = e.ex.queueDepthEnd;
+    const rawEnd = e.ex.queueDepthEnd;
     const max = e.ex.queueDepthMax;
+    // Requêtes tronquées à la coupe (drain borné) : la profondeur RÉSIDUELLE
+    // finale n'est plus une preuve fiable de retard des workers — on garde
+    // uniquement les signaux fondés sur le max et les séries temporelles.
+    const end = c.input.cutInFlight > 0 ? 0 : rawEnd;
     if (end < 5 && max < 50) continue;
     out.push(
       mk(
@@ -735,7 +742,13 @@ const ruleQueueLag: Rule = (c) => {
         e.rt.id,
         e.rt.label,
         [
-          { label: "Profondeur en fin de simulation", value: formatNumber(Math.round(end)) },
+          {
+            label: "Profondeur en fin de simulation",
+            value:
+              c.input.cutInFlight > 0
+                ? `${formatNumber(Math.round(rawEnd))} (fenêtre tronquée)`
+                : formatNumber(Math.round(rawEnd)),
+          },
           { label: "Profondeur maximale", value: formatNumber(Math.round(max)) },
           { label: "Profondeur moyenne", value: formatNumber(Math.round(e.nm.avgQueueLength)) },
           { label: "Profondeur max configurée", value: formatNumber(e.rt.rc.maxDepth) },

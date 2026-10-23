@@ -17,6 +17,8 @@ model Architecture {
   description String?
   /// JSON sérialisé : { nodes: ArchNode[], edges: ArchEdge[], zones: ArchZone[], scenario: ScenarioConfig }
   data        String
+  /// Nombre de nœuds du graphe (dénormalisé : évite de parser `data` pour les listes)
+  nodeCount   Int               @default(0)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   simulations SimulationRecord[]
@@ -26,21 +28,28 @@ model Architecture {
 
 /// Résultat d'une simulation exécutée (pour l'historique et la comparaison).
 model SimulationRecord {
-  id             String       @id @default(cuid())
-  label          String?
-  architectureId String
-  architecture   Architecture @relation(fields: [architectureId], references: [id], onDelete: Cascade)
+  id              String       @id @default(cuid())
+  label           String?
+  architectureId  String
+  architecture    Architecture @relation(fields: [architectureId], references: [id], onDelete: Cascade)
   /// Version du moteur de simulation utilisée
-  engineVersion  String
+  engineVersion   String
   /// 'analytical' | 'event-sampled'
-  mode           String
-  seed           Int
+  mode            String
+  seed            Int
   /// JSON sérialisé : ScenarioConfig
-  scenario       String
+  scenario        String
   /// JSON sérialisé : SimulationResult complet (métriques, séries, diagnostics, hypothèses)
-  result         String
-  createdAt      DateTime     @default(now())
+  result          String
+  /// Résumé dénormalisé de `result.overall` (évite de parser le JSON complet pour les listes)
+  servedRps       Float        @default(0)
+  p95Ms           Float        @default(0)
+  errorRate       Float        @default(0)
+  availability    Float        @default(0)
+  costPerMonthUsd Float        @default(0)
+  createdAt       DateTime     @default(now())
 
   @@index([architectureId])
   @@index([createdAt])
+  @@index([architectureId, createdAt])
 }

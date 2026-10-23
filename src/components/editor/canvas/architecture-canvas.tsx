@@ -29,6 +29,7 @@ import "@xyflow/react/dist/style.css";
 import { toast } from "sonner";
 import { Boxes, GraduationCap, LayoutGrid, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ArchNode } from "@/types";
 import { useAppStore } from "@/stores/app-store";
 import { useEditorStore } from "@/stores/editor-store";
 import { useLibraryStore } from "@/stores/library-store";
@@ -45,12 +46,42 @@ import {
 import { SystemEdge } from "./system-edge";
 import { SystemNode } from "./system-node";
 import { ZoneNode } from "./zone-node";
-import { nodeStatusFromMetrics, type AppEdge, type AppNode, type NodeStatus } from "./types";
+import {
+  nodeStatusFromMetrics,
+  type AppEdge,
+  type AppNode,
+  type NodeStatus,
+  type SystemNodeType,
+  type ZoneNodeType,
+} from "./types";
 
 const nodeTypes: NodeTypes = { system: SystemNode, zone: ZoneNode };
 const edgeTypes: EdgeTypes = { system: SystemEdge };
 
 const ZONE_COLORS = ["indigo", "cyan", "emerald", "amber", "violet", "rose"] as const;
+
+/**
+ * Entrée du cache des nœuds React Flow (voir systemNodeCache) : garder la
+ * référence de l'objet RF tant que ni le nœud du store, ni sa sélection, ni
+ * son statut de simulation n'ont changé d'identité/valeur.
+ */
+interface SystemNodeCacheEntry {
+  archNode: ArchNode;
+  selected: boolean;
+  status: NodeStatus | undefined;
+  rf: SystemNodeType;
+}
+
+/**
+ * Cache des nœuds RF, au niveau MODULE (même patron que les flags de session
+ * d'editor-view) : les règles react-hooks/refs interdisent la lecture d'un
+ * ref pendant le rendu, or ce cache est justement lu dans le useMemo de
+ * conversion. Il est sûr au niveau module : l'unique canvas de l'application
+ * n'est jamais monté deux fois, les entrées sont validées par IDENTITÉ du
+ * nœud du store (un rechargement de document crée de nouveaux objets → miss
+ * systématique) et la purge ci-dessous borne la taille au document courant.
+ */
+const systemNodeCache = new Map<string, SystemNodeCacheEntry>();
 
 function minimapNodeColor(node: RFNode): string {
   if (node.type === "zone") return "#e2e8f0";
@@ -79,6 +110,7 @@ export function ArchitectureCanvas() {
   const simResult = useSimulationStore((s) => s.result);
 
   /* ---------------- conversion store → React Flow ---------------- */
+  /* Le cache d'objets RF stables vit au niveau module (systemNodeCache). */
 
   const statusMap = useMemo(() => {
     const map = new Map<string, NodeStatus>();
@@ -92,31 +124,72 @@ export function ArchitectureCanvas() {
     return map;
   }, [simResult]);
 
-  const rfNodes = useMemo<AppNode[]>(() => {
-    const zoneNodes: AppNode[] = zones.map((zone) => ({
-      id: zone.id,
-      type: "zone",
-      position: zone.position,
-      draggable: false,
-      selectable: false,
-      zIndex: -1,
-      data: { zone },
-      style: { width: zone.size.width, height: zone.size.height },
-    }));
-    const systemNodes: AppNode[] = nodes.map((node) => ({
-      id: node.id,
-      type: "system",
-      position: node.position,
-      selected: selectedNodeIds.includes(node.id),
-      data: {
-        archNode: node,
-        component: getComponentById(node.componentId),
-        status: statusMap.get(node.id),
-      },
-    }));
-    // Les zones en tête : rendues derrière les nœuds système.
-    return [...zoneNodes, ...systemNodes];
-  }, [zones, nodes, selectedNodeIds, statusMap]);
+  // Zones : memo dédié (les zones ne changent pas pendant un drag de nœud —
+  // leurs objets RF restent identiques, React Flow réutilise ses nœuds
+  // internes et les wrappers de zone ne re-render pas).
+  const rfZoneNodes = useMemo<ZoneNodeType[]>(
+    () =>
+      zones.map((zone) => ({
+        id: zone.id,
+        type: "zone" as const,
+        position: zone.position,
+        draggable: false,
+        selectable: false,
+        zIndex: -1,
+        data: { zone },
+        style: { width: zone.size.width, height: zone.size.height },
+      })),
+    [zones],
+  );
+
+  // Nœuds système : pendant un drag, moveNode ne recrée QUE l'objet du nœud
+  // déplacé (les autres gardent leur référence). En réutilisant l'objet RF
+  // précédent pour les nœuds inchangés (ni nœud, ni sélection, ni statut
+  // modifiés), React Flow (adoptUserNodes, checkEquality : identité)
+  // réutilise son nœud interne → seul le wrapper du nœud déplacé re-render.
+  // Le memo reste O(n) par frame mais n'alloue plus n objets data + n objets
+  // RF : c'est un simple hit/miss sur le cache.
+  const rfSystemNodes = useMemo<SystemNodeType[]>(() => {
+    const result = nodes.map((node) => {
+      const selected = selectedNodeIds.includes(node.id);
+      const status = statusMap.get(node.id);
+      const cached = systemNodeCache.get(node.id);
+      if (
+        cached &&
+        cached.archNode === node &&
+        cached.selected === selected &&
+        cached.status === status
+      ) {
+        return cached.rf;
+      }
+      const rf: SystemNodeType = {
+        id: node.id,
+        type: "system",
+        position: node.position,
+        selected,
+        data: {
+          archNode: node,
+          component: getComponentById(node.componentId),
+          status,
+        },
+      };
+      systemNodeCache.set(node.id, { archNode: node, selected, status, rf });
+      return rf;
+    });
+    // Purge des entrées obsolètes (nœud supprimé/undo) : la taille du cache
+    // reste bornée au document courant.
+    const alive = new Set(nodes.map((n) => n.id));
+    for (const id of systemNodeCache.keys()) {
+      if (!alive.has(id)) systemNodeCache.delete(id);
+    }
+    return result;
+  }, [nodes, selectedNodeIds, statusMap]);
+
+  // Les zones en tête : rendues derrière les nœuds système.
+  const rfNodes = useMemo<AppNode[]>(
+    () => [...rfZoneNodes, ...rfSystemNodes],
+    [rfZoneNodes, rfSystemNodes],
+  );
 
   const rfEdges = useMemo<AppEdge[]>(
     () =>
@@ -131,7 +204,9 @@ export function ArchitectureCanvas() {
           type: MarkerType.ArrowClosed,
           width: 16,
           height: 16,
-          color: "#94a3b8",
+          // Token d'arête (globals.css) — la couleur du marqueur est appliquée
+          // en style inline par React Flow, la variable CSS y est résolue.
+          color: "var(--xy-edge-stroke-default)",
         },
       })),
     [edges, selectedEdgeId],

@@ -19,6 +19,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
         name,
         description: source.description,
         data: source.data,
+        nodeCount: source.nodeCount,
       },
     });
     return NextResponse.json(

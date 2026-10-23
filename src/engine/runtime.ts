@@ -22,6 +22,27 @@ export const MAX_NODES = 60;
 export const MAX_EDGES_WARN = 120;
 /** Requêtes simulées au maximum avant échantillonnage (rps × durée). */
 export const MAX_EVENTS = 100_000;
+/**
+ * Budget GLOBAL de requêtes créées (arrivées externes + clones internes de
+ * fan-out + messages + effets de bord). MAX_EVENTS ne borne que les arrivées
+ * externes : un graphe à fan-out profond (proxy « persister + publier » en
+ * cascade) sinon multiplie les événements sans limite et gèle le navigateur.
+ * Valeur : max(1 200 000, 2,5 × maximum observé sur les 17 modèles — 214 766
+ * requêtes pour whatsapp-messagerie) ⇒ 1 200 000. Au-delà, les CLONES de
+ * fan-out ne sont plus créés (compteur de drops) ; le chemin principal
+ * continue et un clamp pédagogique est émis.
+ */
+export const MAX_TOTAL_REQUESTS = 1_200_000;
+/** Bornes de la profondeur de file (maxDepth) — capacité de file des messages. */
+export const MIN_MAX_DEPTH = 1;
+export const MAX_MAX_DEPTH = 10_000;
+/** Bornes du pool de connexions (maxConnections) — caches/bases/répliques. */
+export const MIN_MAX_CONNECTIONS = 1;
+export const MAX_MAX_CONNECTIONS = 10_000;
+/** Budget temps réel d'un drain interne (tryDrainFifo / handleDispatch). */
+export const DRAIN_SLICE_MS = 16;
+/** Granularité du contrôle de tranche dans les boucles de drain internes. */
+export const DRAIN_ITER_CHUNK = 256;
 /** Profondeur maximale (sauts) d'une requête avant erreur « boucle ». */
 export const MAX_HOPS = 10;
 /** Capacité de la file FIFO d'un serveur (en requêtes, avant rejet 503). */
@@ -173,12 +194,39 @@ export interface RoleConfig {
 
 const num01 = (n: number): number => Math.min(1, Math.max(0, n));
 const numPos = (n: number): number => Math.max(n > 0 ? n : 0.001, 0.001);
+const fmtBound = (n: number): string => (Number.isFinite(n) ? String(n) : "—");
 
 /** Résout la configuration d'un nœud en valeurs numériques bornées. */
-export function resolveRoleConfig(node: ArchNode): RoleConfig {
+export function resolveRoleConfig(node: ArchNode, clampLog?: string[]): RoleConfig {
   const algorithm = cfgStr(node, "algorithm");
   const layer = cfgStr(node, "layer");
   const rlAlgorithm = cfgStr(node, "algorithm");
+  const rawMaxDepth = Math.round(cfgNum(node, "maxDepth"));
+  const rawMaxConnections = Math.round(cfgNum(node, "maxConnections"));
+  const maxDepth = Math.min(MAX_MAX_DEPTH, Math.max(MIN_MAX_DEPTH, rawMaxDepth));
+  const maxConnections = Math.min(
+    MAX_MAX_CONNECTIONS,
+    Math.max(MIN_MAX_CONNECTIONS, rawMaxConnections),
+  );
+  // Diagnostic de clamp uniquement pour une valeur réellement CONFIGURÉE sur
+  // le nœud (≠ défaut du catalogue) : les défauts hors bornes (ex. maxDepth
+  // 1 000 000 pour Kafka) sont normalisés silencieusement — sinon chaque
+  // simulation bénie porterait des diagnostics « paramètre ajusté » sans
+  // intérêt pédagogique.
+  const catalogDepth = getComponentById(node.componentId)?.defaults?.maxDepth;
+  const catalogConn = getComponentById(node.componentId)?.defaults?.maxConnections;
+  const depthConfigured = node.config?.maxDepth !== undefined && node.config.maxDepth !== catalogDepth;
+  const connConfigured = node.config?.maxConnections !== undefined && node.config.maxConnections !== catalogConn;
+  if (clampLog && maxDepth !== rawMaxDepth && depthConfigured) {
+    clampLog.push(
+      `profondeur de file (maxDepth) ${fmtBound(rawMaxDepth)} → ${maxDepth} (bornes ${MIN_MAX_DEPTH}–${MAX_MAX_DEPTH}) — nœud « ${node.label || node.id} »`,
+    );
+  }
+  if (clampLog && maxConnections !== rawMaxConnections && connConfigured) {
+    clampLog.push(
+      `connexions max (maxConnections) ${fmtBound(rawMaxConnections)} → ${maxConnections} (bornes ${MIN_MAX_CONNECTIONS}–${MAX_MAX_CONNECTIONS}) — nœud « ${node.label || node.id} »`,
+    );
+  }
   return {
     weight: Math.max(0.001, cfgNum(node, "weight")),
     cacheHitRatio: num01(cfgNum(node, "cacheHitRatio")),
@@ -201,7 +249,7 @@ export function resolveRoleConfig(node: ArchNode): RoleConfig {
     cpuCoresPerInstance: numPos(cfgNum(node, "cpuCoresPerInstance")),
     memoryGbPerInstance: numPos(cfgNum(node, "memoryGbPerInstance")),
     hitRatio: num01(cfgNum(node, "hitRatio")),
-    maxConnections: Math.max(1, Math.round(cfgNum(node, "maxConnections"))),
+    maxConnections: maxConnections,
     memoryGb: numPos(cfgNum(node, "memoryGb")),
     evictionPolicy: cfgStr(node, "evictionPolicy"),
     avgReadMs: numPos(cfgNum(node, "avgReadMs")),
@@ -211,7 +259,7 @@ export function resolveRoleConfig(node: ArchNode): RoleConfig {
     internalCacheEnabled: cfgBool(node, "internalCacheEnabled"),
     replicationPolicy: cfgStr(node, "replicationPolicy"),
     replicationLagMs: Math.max(0, cfgNum(node, "replicationLagMs")),
-    maxDepth: Math.max(1, Math.round(cfgNum(node, "maxDepth"))),
+    maxDepth: maxDepth,
     partitions: Math.max(1, Math.round(cfgNum(node, "partitions"))),
     persistMessages: cfgBool(node, "persistMessages"),
     avgProcessingMs: numPos(cfgNum(node, "avgProcessingMs")),
@@ -409,6 +457,50 @@ export interface FifoEntry {
   enqueuedAt: number;
 }
 
+/* ============================================================
+ * FIFO à indice de tête — dequeue O(1)
+ *
+ * `fifo` conserve les entrées consommées jusqu'à la compaction : la tête
+ * logique est `fifoHead`, la taille logique est `fifo.length - fifoHead`.
+ * Compaction amortie : quand la tête dépasse 512 ET la moitié du tableau,
+ * on retire d'un coup le préfixe consommé (chaque entrée est déplacée au
+ * plus une fois → coût amorti O(1) par défilement).
+ * ============================================================ */
+
+/** Taille logique de la FIFO (O(1)). */
+export function fifoSize(rt: NodeRuntime): number {
+  return rt.fifo.length - rt.fifoHead;
+}
+
+/** Enfile une entrée (O(1) amorti). */
+export function fifoEnqueue(rt: NodeRuntime, entry: FifoEntry): void {
+  rt.fifo.push(entry);
+}
+
+/** Défile la plus ancienne entrée (O(1) amorti) ; null si vide. */
+export function fifoDequeue(rt: NodeRuntime): FifoEntry | null {
+  const head = rt.fifoHead;
+  if (head >= rt.fifo.length) return null;
+  const entry = rt.fifo[head];
+  if (entry === undefined) return null;
+  rt.fifo[head] = undefined; // libère la référence (GC)
+  const newHead = head + 1;
+  rt.fifoHead = newHead;
+  if (newHead > 512 && newHead * 2 > rt.fifo.length) {
+    rt.fifo.splice(0, newHead);
+    rt.fifoHead = 0;
+  }
+  return entry;
+}
+
+/** Cibles de routage aval d'un serveur/worker, groupées par rôle (précalcul). */
+export interface RouteTargets {
+  caches: string[];
+  replicas: string[];
+  databases: string[];
+  queues: string[];
+}
+
 /** Nœud à l'exécution : configuration résolue + état dynamique. */
 export interface NodeRuntime {
   id: string;
@@ -420,8 +512,13 @@ export interface NodeRuntime {
   rc: RoleConfig;
   /** Slots de concurrence effectifs (échelle d'échantillonnage appliquée). */
   slots: number;
-  /** File FIFO : serveurs (attente), bases/caches (connexions), files (messages). */
-  fifo: FifoEntry[];
+  /**
+   * File FIFO : serveurs (attente), bases/caches (connexions), files (messages).
+   * Les cases [0, fifoHead) sont déjà consommées (voir fifoSize/fifoDequeue).
+   */
+  fifo: (FifoEntry | undefined)[];
+  /** Indice de tête logique de la FIFO (défilement O(1)). */
+  fifoHead: number;
   /** Capacité en débit (cdn, balancer, proxy, storage). */
   bucket: TokenBucket | null;
   /** Jetons du rate limiter (token bucket) ou fenêtre glissante (timestamps ms). */
@@ -431,6 +528,12 @@ export interface NodeRuntime {
   cb: Map<string, CircuitState>;
   /** Compteur round-robin. */
   rr: number;
+  /** Cibles aval par rôle (serveurs/workers) — précalculées à l'initialisation. */
+  routes: RouteTargets | null;
+  /** Cibles directes (balancer) — précalculées, ordre des arêtes préservé. */
+  outTargets: string[] | null;
+  /** Latence d'arête par cible (tous rôles) — première arête gagne, comme avant. */
+  outLatencyMs: Map<string, number> | null;
 }
 
 /** Contexte de simulation — partagé par tous les handlers. */
@@ -460,6 +563,12 @@ export interface SimContext {
   genTotalWeight: number;
   /** Requêtes coupées par la limite de profondeur (boucles). */
   loopKilled: number;
+  /** Total de requêtes créées (externes + clones + messages) — garde fan-out. */
+  requestsCreated: number;
+  /** Plafond de requêtes créées (MAX_TOTAL_REQUESTS). */
+  maxRequests: number;
+  /** Clones de fan-out abandonnés faute de budget (chemin principal préservé). */
+  fanoutDropped: number;
   reqSeq: number;
   /** Temps simulé courant (ms). */
   now: number;
