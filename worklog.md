@@ -509,3 +509,21 @@ Stage Summary:
 - Modèles : 29 architectures dont 18 « géants de la tech » avec logos d'entreprises, faits marquants, recherche et galerie retravaillée (débordements corrigés, contrastes renforcés, 0/18 cartes en overflow).
 - Éditeur : logos de marques réelles sur les nœuds/panneaux/bibliothèque (17 technologies), avec stratégie sombre invert/brighten ; mini-carte enfin sombre ; correctifs de robustesse (coller, sauvegarde concurrente, Ctrl+S, brouillon corrompu, error boundary, course open-architecture).
 - Apprentissage : boucle d'exercice bouclée de bout en bout (cours → éditeur → simulation → évaluation des critères + retour au cours), en complément de la refonte 10-b (XP, quiz persistant, sommaire, à retenir).
+---
+Task ID: 11
+Agent: orchestrateur (principal)
+Task: README complet avec captures réelles de l'interface (16 captures, revue VLM, overlay dev masqué)
+
+Work Log:
+- docs/screenshots/ créé : 16 captures fraîches prises via agent-browser (1440x900 desktop + 390x844 mobile, thèmes clair et sombre) : landing clair/sombre, galerie de modèles + section géants, fiche de détail Instagram (logo + fait marquant), éditeur avec logos de marques (clair + sombre), résultats complets (KPIs, graphiques, carte de charge — simulation Instagram rejouée), liste des cours + carte XP, cours ouvert (sommaire actif), quiz persistant, tableau de bord, comparaison A/B (2 simulations cochées dans l'historique), mobile landing (scroll calibré au pixel pour une coupe propre : h2 entièrement visible).
+- Découverte et correction : le bouton flottant « N » (overlay Next.js Dev Tools, artefact de dev uniquement) polluait les captures → masqué via nextjs-portal display:none (persiste à travers la navigation) → 16 captures reprises intégralement sans l'overlay (vérifié VLM : non/non/non).
+- set media dark insuffisant pour next-themes → bascule via le vrai bouton de thème (captures sombres authentiques, vérifiées par luminosité moyenne pixel : 29.9/255 sombre vs 244.5 clair).
+- Revue VLM en 4 rounds sur les 16 captures : 1 faux positif investigué et écarté (prétendu « rectangle fantôme » sur le canvas sombre = rendu normal d'une zone React Flow, confirmé par zoom x2 + sondage DOM elementFromPoint : aucun chevauchement, tous les nœuds dans leurs zones) ; capture mobile templates écartée (troncatures de cartes jugées peu flatteuses) au profit de la landing mobile.
+- README.md réécrit intégralement (français) : héros clair/sombre côte à côte, sommaire ancré, présentation, 7 sections fonctionnelles illustrées (29 modèles dont 18 géants, éditeur 130 composants + logos réels, 2 moteurs, résultats/diagnostics, A/B, apprentissage 23 cours/XP/15 exercices évalués, dark+mobile+a11y), démarrage rapide, stack technique, architecture du code + routes API, documentation (engine.md, worklog.md), limites connues, crédits (simple-icons CC0, Lucide, reconstitutions pédagogiques).
+- Chiffres vérifiés par script (bun, imports src/) : 29 modèles / 18 géants / 130 composants / 23 cours / 15 exercices — cohérents entre README et code.
+- Chemins des 16 images du README vérifiés (16/16 existants) ; légende de galerie corrigée (la reprise ne montre pas la recherche « kafka » active) ; ancienne capture mobile supprimée.
+- État : dev.log propre (aucune erreur runtime), console navigateur sans erreur JS (seuls avertissements React Flow préexistants), lint non impacté (aucune modification de src/).
+
+Stage Summary:
+- Le projet a un README de qualité présentation : 16 captures réelles organisées par fonctionnalité (clair/sombre, desktop/mobile), revues visuellement, sans artefact d'environnement de développement.
+- Aucun code applicatif modifié — uniquement README.md, docs/screenshots/ et worklog.md.
