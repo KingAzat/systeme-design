@@ -7,7 +7,7 @@
  * sauvegarde manuelle + sauvegarde automatique (debounce 2 s) et bascule des
  * panneaux latéraux (desktop) / Sheet (mobile).
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
 import {
   CircleX,
@@ -67,6 +67,7 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
   const canRedo = useEditorStore((s) => s.future.length > 0);
   const libraryOpen = useEditorStore((s) => s.libraryOpen);
   const configOpen = useEditorStore((s) => s.configOpen);
+  const saveRequests = useEditorStore((s) => s.saveRequests);
 
   const setView = useAppStore((s) => s.setView);
 
@@ -77,26 +78,39 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
   // persistant tant qu'une nouvelle sauvegarde n'a pas réussi.
   const [autosaveFailed, setAutosaveFailed] = useState(false);
   const saveInFlight = useRef(false);
+  // Sauvegarde demandée pendant qu'une autre était en vol (timer d'auto-save
+  // tombé pendant l'aller-retour réseau, ou Ctrl+S) : relancée à la complétion.
+  // `false` (demande explicite) prime sur `true` (auto-save silencieux).
+  const queuedSave = useRef<boolean | null>(null);
 
   /* ----------------------- sauvegarde ----------------------- */
 
-  const save = async (silent: boolean): Promise<void> => {
-    if (saveInFlight.current) return;
+  const save = useCallback(async (silent: boolean): Promise<void> => {
+    if (saveInFlight.current) {
+      queuedSave.current = queuedSave.current === false ? false : silent;
+      return;
+    }
     const editor = useEditorStore.getState();
     const data = editor.toArchitectureData();
+    // Révision capturée AVANT l'aller-retour réseau : si l'utilisateur modifie
+    // le document pendant la sauvegarde, ces mutations ne sont pas couvertes —
+    // il faut garder dirty=true (sinon l'indicateur ment, le timer d'auto-save
+    // est désarmé et beforeunload ne protège plus rien).
+    const revisionAtStart = editor.revision;
     saveInFlight.current = true;
     setSaving(true);
     try {
+      const keepDirty = useEditorStore.getState().revision !== revisionAtStart;
       if (editor.architectureId) {
         await storage.architectures.update(editor.architectureId, {
           name: data.name,
           description: data.description ?? null,
           data,
         });
-        editor.markSaved();
+        editor.markSaved(editor.architectureId, { keepDirty });
       } else {
         const created = await storage.architectures.create(data);
-        editor.markSaved(created.id);
+        editor.markSaved(created.id, { keepDirty });
       }
       await useAppStore.getState().refreshArchitectures();
       setAutosaveFailed(false);
@@ -125,8 +139,14 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
     } finally {
       saveInFlight.current = false;
       setSaving(false);
+      // Relance d'une demande arrivée pendant le vol (voir queuedSave).
+      if (queuedSave.current !== null) {
+        const queued = queuedSave.current;
+        queuedSave.current = null;
+        void save(queued);
+      }
     }
-  };
+  }, []);
 
   // Sauvegarde automatique : 2 s après la dernière action mutante,
   // uniquement si l'architecture est déjà persistée (architectureId ≠ null).
@@ -138,7 +158,7 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
       void save(true);
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [revision, dirty, architectureId]);
+  }, [revision, dirty, architectureId, save]);
 
   /* ----------------------- édition du nom ----------------------- */
 
@@ -147,6 +167,13 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
     if (trimmed) useEditorStore.getState().rename(trimmed);
     setEditingName(false);
   };
+
+  /* -------- Ctrl+S : demande de sauvegarde relayée par le canvas -------- */
+
+  useEffect(() => {
+    if (saveRequests === 0) return;
+    void save(false);
+  }, [saveRequests, save]);
 
   /* ----------------------- validité ----------------------- */
 
@@ -215,8 +242,8 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
             </span>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-72">
-              Le serveur local est injoignable. Nouvel essai automatique à la
-              prochaine modification.
+              La dernière sauvegarde a échoué — serveur injoignable ou données
+              refusées. Elle sera retentée à la prochaine modification.
             </TooltipContent>
           </Tooltip>
         )}
@@ -270,9 +297,9 @@ export function EditorToolbar({ analysis, onToggleLibrary, onToggleConfig }: Edi
               </p>
             ) : (
               <ul className="space-y-1">
-                {analysis.issues.slice(0, 10).map((issue) => (
+                {analysis.issues.slice(0, 10).map((issue, issueIndex) => (
                   <li
-                    key={`${issue.code}-${issue.nodeId ?? ""}`}
+                    key={`${issue.code}-${issue.nodeId ?? ""}-${issueIndex}`}
                     className="flex items-start gap-1.5 text-xs"
                   >
                     {issue.severity === "error" ? (

@@ -42,6 +42,11 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["client-serveur", "requête/réponse", "stateless", "concurrence", "loi de Little"],
+    keyTakeaways: [
+      "Capacité d'un serveur ≈ concurrence × 1000 / latence en ms : 50 requêtes en cours à 40 ms donnent environ 1 250 req/s (loi de Little).",
+      "Stateless est la condition du scaling horizontal : sessions et paniers vivent dans Redis ou la base, jamais en mémoire locale.",
+      "Un serveur stateful (WebSocket, cache local) contraint le routage : n'importe quelle instance ne peut plus servir n'importe quel client.",
+    ],
     quiz: [
       {
         question: "Que signifie « stateless » pour un serveur ?",
@@ -107,6 +112,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["HTTP", "codes de statut", "TLS", "HTTP/2", "idempotence"],
+    keyTakeaways: [
+      "Codes par famille : 2xx succès, 3xx redirection, 4xx erreur client, 5xx erreur serveur — 503 signale saturation ou maintenance.",
+      "POST n'est pas idempotent : un retry peut créer la commande en double, d'où les clés d'idempotence.",
+      "Chaque aller-retour réseau coûte 10 à 100 ms : keep-alive et le multiplexage HTTP/2 comptent autant que la compression.",
+      "Toute requête sortante porte un timeout ; 408 et 504 signalent le dépassement, 429 la limite de débit.",
+    ],
     quiz: [
       {
         question: "Un serveur renvoie 503. Que signifie ce code ?",
@@ -171,6 +182,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["REST", "ressource", "pagination par curseur", "problème N+1", "versioning", "clé d'idempotence"],
+    keyTakeaways: [
+      "Jamais de réponse non bornée : paginer, filtrer, trier côté serveur — une liste non paginée est un incident en sursis.",
+      "La pagination par curseur (WHERE id > dernier) reste constante en temps là où l'offset re-scanne les premières lignes.",
+      "N+1 : une requête par élément de liste cumule la latence — jointures, inclusions (?include=) ou batch loading.",
+      "Versionner dès le premier consommateur externe : retirer un champ casse des clients que vous ne contrôlez pas.",
+    ],
     quiz: [
       {
         question: "GET /users/42 renvoie 200. Après DELETE /users/42, GET /users/42 renvoie…",
@@ -235,6 +252,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["ACID", "index B-tree", "WAL", "pool de connexions", "isolation"],
+    keyTakeaways: [
+      "Un index B-tree répond en O(log n) : la différence entre 8 ms et 8 s — mais chaque index ralentit les écritures.",
+      "SQL ou NoSQL selon les requêtes dominantes : ACID et jointures pour le transactionnel, spécialisation (clé-valeur, document, wide-column) pour vitesse et volume.",
+      "Le pool de connexions (PgBouncer) multiplexe des milliers de clients sur quelques dizaines de connexions réelles.",
+      "Une écriture durable traverse le WAL avec fsync : 5 à 35 ms — le niveau d'isolation définit ce que les transactions concurrentes voient.",
+    ],
     quiz: [
       {
         question: "Qu'est-ce qu'une transaction ACID ?",
@@ -304,6 +327,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["cache-aside", "TTL", "éviction LRU", "taux de hit", "cache stampede"],
+    keyTakeaways: [
+      "Un cache transforme une lecture de 50 ms en 0,2 ms — trois ordres de grandeur.",
+      "Cache-aside : l'application lit le cache, puis la base, puis remplit le cache.",
+      "L'invalidation est le problème difficile : purge trop agressive = perte de hit, trop laxiste = données périmées.",
+      "Dimensionnez le cache sur le working set, pas sur la taille totale.",
+    ],
     quiz: [
       {
         question: "Le pattern cache-aside consiste à…",
@@ -388,6 +417,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["L4 vs L7", "round-robin", "least-connections", "health check", "point de défaillance unique"],
+    keyTakeaways: [
+      "N serveurs derrière un répartiteur ≈ N fois le débit, plus la redondance — sans lui, seul le scaling vertical reste.",
+      "L7 lit HTTP (routes, en-têtes, terminaison TLS) pour 1 à 5 ms ; L4 distribue les paquets TCP sans les lire.",
+      "Least Connections gagne quand les requêtes ont des durées variées ; Round Robin ignore la charge réelle.",
+      "Sans health checks, la moitié du trafic part vers un serveur mort — et le répartiteur lui-même doit être redondé.",
+    ],
     quiz: [
       {
         question: "Quelle différence entre un load balancer L4 et L7 ?",
@@ -467,6 +502,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["latence", "débit", "percentiles p95/p99", "loi de Little", "saturation"],
+    keyTakeaways: [
+      "p95 = 95 % des requêtes servies en moins de X ms : la moyenne masque les malheureux, les SLO s'écrivent en percentiles.",
+      "Au-delà de 70-80 % d'utilisation, l'attente en file explose : on dimensionne à ρ ≤ 0,7, jamais à 100 %.",
+      "Loi de Little : file = débit × attente — 2 000 req/s avec 100 ms d'attente font 200 requêtes en file.",
+      "La latence de bout en bout est la somme des étages : optimiser d'abord le terme dominant, et mesurer côté client.",
+    ],
     quiz: [
       {
         question: "p95 = 250 ms signifie…",
@@ -551,6 +592,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["stateless", "scaling vertical vs horizontal", "goulot d'étranglement", "autoscaling", "drain"],
+    keyTakeaways: [
+      "Étape un de toute montée en charge : auditer l'état local (sessions, fichiers, travaux) et le déporter vers Redis, stockage objet ou files.",
+      "Le goulot se déplace : instances ajoutées, la base sature — pool, cache, réplicas de lecture, puis sharding, en mesurant à chaque étape.",
+      "L'autoscaling optimise le coût, pas l'architecture : il multiplie ce qui existe, bon ou mauvais.",
+      "Le délai de démarrage (1 à 3 minutes) laisse passer les pics courts ; le rétrécissement doit être progressif (drain des connexions).",
+    ],
     quiz: [
       {
         question: "Qu'est-ce qui bloque le scaling horizontal d'un serveur qui garde ses sessions en mémoire ?",
@@ -636,6 +683,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["réplication synchrone/asynchrone", "RPO/RTO", "lag de réplication", "failover", "split-brain"],
+    keyTakeaways: [
+      "Asynchrone : rapide, mais une panne du primaire peut perdre les dernières écritures (RPO > 0) ; synchrone : RPO 0, écriture plus lente.",
+      "Le lag casse le read-your-writes : enregistrer puis recharger sans rien voir — router les lectures de l'auteur vers le primaire.",
+      "Failover : quelques secondes à quelques minutes d'écriture indisponible (RTO) ; le split-brain se prévient par quorum et fencing.",
+      "Semi-synchrone — au moins un ack avec délai de grâce — est le compromis courant.",
+    ],
     quiz: [
       {
         question: "Avec la réplication asynchrone, une panne du primaire peut…",
@@ -721,6 +774,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["clé de sharding", "consistent hashing", "shard chaud", "scatter-gather", "re-sharding"],
+    keyTakeaways: [
+      "La clé décide de tout : par hash pour répartir uniformément les écritures, par intervalle pour les plages — au risque de zones chaudes.",
+      "Le consistent hashing ajoute un nœud en ne déplaçant qu'environ 1/N des clés : c'est la mécanique de Cassandra et des partitions Kafka.",
+      "Les jointures cross-shard disparaissent : dénormaliser ou agréger en scatter-gather — latence = maximum des shards.",
+      "On sharde tard mais volontairement : re-équilibrer des millions de clés en production reste lourd (Vitess, Citus).",
+    ],
     quiz: [
       {
         question: "Pourquoi hasher la clé plutôt que sharder par intervalles ?",
@@ -807,6 +866,12 @@ export const COURSES: Course[] = [
       "DLQ",
       "idempotence",
     ],
+    keyTakeaways: [
+      "Queue (RabbitMQ, SQS) : un message remis à un consommateur ; journal (Kafka) : partitions ordonnées, relues pendant la rétention.",
+      "La livraison est au moins une fois : les consommateurs doivent être idempotents (clé de déduplication, upsert).",
+      "L'ordre est garanti par partition, pas globalement : partitionner par entité pour l'ordre utile.",
+      "Le consumer lag (profondeur restante / vitesse de consommation) est l'alerte numéro un ; les messages poisons finissent en DLQ.",
+    ],
     quiz: [
       {
         question: "Que mesure le consumer lag ?",
@@ -891,6 +956,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["202 Accepted", "webhook", "cohérence à terme", "retry backoff", "trace distribuée"],
+    keyTakeaways: [
+      "202 Accepted + identifiant de tâche : la latence perçue passe de 12 s à 200 ms, le travail part en tâche de fond.",
+      "Asynchrone pour le travail, synchrone pour la décision : validation de paiement et lectures attendent une réponse immédiate.",
+      "Webhook ou polling pour la complétion : le webhook crée un point de rendez-vous à sécuriser (signature, idempotence).",
+      "Timeouts, backoff exponentiel + jitter et trace ID propagé : sans traces, déboguer un flux asynchrone relève de la spéléologie.",
+    ],
     quiz: [
       {
         question: "Que répond une API qui accepte un travail sans le traiter immédiatement ?",
@@ -975,6 +1046,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["token bucket", "fenêtre glissante", "429", "quota", "compteurs distribués"],
+    keyTakeaways: [
+      "Un refus propre (429 + Retry-After) vaut mieux qu'un 503 aléatoire trois minutes plus tard : le client sait quand revenir.",
+      "Token bucket : débit moyen r, capacité de rafale b — moyenne maîtrisée, pointes tolérées ; leaky bucket lisse parfaitement la sortie.",
+      "En distribué, les compteurs doivent être partagés (Redis, INCR + EXPIRE) : N compteurs locaux = N fois la limite.",
+      "Calibrer les seuils à 70-80 % du débit réellement tenu, par route : lecture généreuse, écriture comptée.",
+    ],
     quiz: [
       {
         question: "Que renvoie une API qui refuse une requête à cause du débit ?",
@@ -1049,6 +1126,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["timeout", "backoff + jitter", "circuit breaker", "bulkhead", "fallback"],
+    keyTakeaways: [
+      "Pas d'appel sans timeout : une dépendance lente est une dépendance morte qui occupe des ressources.",
+      "Retries : opérations idempotentes uniquement, backoff exponentiel + jitter, budget borné (environ 10 % du trafic).",
+      "Circuit breaker : fermé → ouvert au seuil d'erreurs → demi-ouvert après cooldown — fail-fast contre slow-death.",
+      "Bulkhead cloisonne les pools par dépendance ; fallback : une page dégradée vaut mieux qu'une page d'erreur globale.",
+    ],
     quiz: [
       {
         question: "À quoi sert un circuit breaker ?",
@@ -1133,6 +1216,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["logs structurés", "métriques RED", "traces distribuées", "SLO et error budget", "échantillonnage"],
+    keyTakeaways: [
+      "On débugge aux métriques, on comprend aux traces, on prouve aux logs.",
+      "RED par service (Rate, Errors, Duration), USE par ressource (Utilization, Saturation, Errors) : le socle de chaque tableau de bord.",
+      "Alerter sur les symptômes (p95 > SLO pendant 5 min), pas sur les causes (CPU élevé) : trop d'alertes = plus personne ne regarde.",
+      "SLO 99,9 % = environ 43 minutes d'error budget par mois : c'est lui qui arbitre vélocité contre fiabilité.",
+    ],
     quiz: [
       {
         question: "Que signifie RED pour un service ?",
@@ -1215,6 +1304,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["linéarisabilité", "cohérence à terme", "read-your-writes", "cohérence causale", "CRDT", "quorum"],
+    keyTakeaways: [
+      "Linéarisable : toute lecture voit la dernière écriture — puissant mais coûteux (quorum) et fragile sous partition ; à terme : rapide, lectures anciennes possibles.",
+      "Les garanties de session (read-your-writes, lectures monotones, cohérence causale) coûtent peu et couvrent la plupart des besoins réels.",
+      "Écritures concurrentes : dernier-arrivé-gagne perd des données, CRDT converge sans coordination, leader unique sérialise.",
+      "Choisir par type de donnée : solde bancaire en cohérence forte, compteur de vues à terme.",
+    ],
     quiz: [
       {
         question: "La cohérence à terme signifie…",
@@ -1284,6 +1379,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["consensus", "quorum 2f+1", "élection de leader", "Raft", "FLP", "lease"],
+    keyTakeaways: [
+      "2f+1 nœuds tolèrent f pannes : 3 nœuds tolèrent 1 panne, 5 en tolèrent 2 — toute décision passe par la majorité.",
+      "Le chevauchement des majorités garantit la sûreté : impossible d'approuver deux valeurs contradictoires.",
+      "Chaque écriture coûte un aller-retour vers la majorité : quelques ms en local, 50 à 100 ms inter-région ; l'élection prend 1 à 10 s.",
+      "etcd et ZooKeeper coordonnent (configuration, élections), ils ne stockent pas la masse ; leases et fencing neutralisent les anciens détenteurs.",
+    ],
     quiz: [
       {
         question: "Avec 5 nœuds Raft, combien de pannes sont tolérées ?",
@@ -1347,6 +1448,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["CAP", "partition réseau", "CP/AP", "PACELC", "niveau de cohérence"],
+    keyTakeaways: [
+      "CAP ne parle que du moment de la partition : sans coupure réseau, cohérence et disponibilité coexistent — un système « CA » est un vœu pieux.",
+      "CP refuse sans quorum (etcd, ZooKeeper) ; AP sert tout et converge (DynamoDB) — la plupart des systèmes règlent le curseur par requête.",
+      "PACELC : même sans partition, la cohérence se paie en latence (ack de quorum permanent).",
+      "Décider par coût de l'erreur : encaissement → cohérence ; compteur de vues → disponibilité ; panier → read-your-writes.",
+    ],
     quiz: [
       {
         question: "Que dit précisément le théorème CAP ?",
@@ -1416,6 +1523,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["commande/requête", "projection", "dénormalisation", "scalabilité indépendante", "cohérence à terme"],
+    keyTakeaways: [
+      "Écritures pour l'intégrité, lectures pour la vitesse : CQRS sépare les deux modèles, les projections alimentent le côté lecture.",
+      "Une projection est reconstruisable : vider la vue, rejouer le flux — le décalage (millisecondes à secondes) est borné et surveillé.",
+      "Gain : échelles indépendantes (12 réplicas de lecture pour 2 nœuds d'écriture) et lectures sans jointure au moment de lire.",
+      "Prix : cohérence à terme à assumer côté UX et deux pipelines à opérer — sous quelques centaines de req/s, un modèle CRUD bien indexé suffit.",
+    ],
     quiz: [
       {
         question: "En CQRS, une projection sert à…",
@@ -1500,6 +1613,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["événement immuable", "rejeu", "snapshot", "projection", "upcasting", "crypto-shredding"],
+    keyTakeaways: [
+      "L'état n'existe pas : il se calcule par rejeu (fold) des événements immuables — l'audit est la structure même du stockage.",
+      "Les requêtes temporelles sont gratuites : l'état d'hier 14 h = rejeu du flux jusqu'à cet instant.",
+      "Snapshots tous les 100 à 1 000 événements bornent le coût du rejeu ; l'upcasting garde les événements de trois ans lisibles.",
+      "RGPD dans un journal immuable : crypto-shredding — détruire la clé utilisateur rend ses événements indéchiffrables.",
+    ],
     quiz: [
       {
         question: "En event sourcing, l'état courant d'un agrégat s'obtient par…",
@@ -1575,6 +1694,12 @@ export const COURSES: Course[] = [
       "orchestration et chorégraphie",
       "idempotence",
       "verrou sémantique",
+    ],
+    keyTakeaways: [
+      "2PC verrouille tous les participants et reste bloqué si le coordinateur meurt ; la saga enchaîne des transactions locales avec compensations.",
+      "Chorégraphie : découplage maximal mais flux disséminé ; orchestration : flux visible en un endroit — orchestrer au-delà de cinq étapes.",
+      "Chaque étape porte son undo (paiement → remboursement), rejoué en ordre inverse à l'échec ; les étapes doivent être idempotentes.",
+      "Les états intermédiaires sont des fonctionnalités : verrou sémantique et progression affichée évitent de vendre deux fois le même article.",
     ],
     quiz: [
       {
@@ -1660,6 +1785,12 @@ export const COURSES: Course[] = [
       },
     ],
     concepts: ["région et zone de disponibilité", "anycast", "actif-actif", "résidence des données", "réplication inter-région"],
+    keyTakeaways: [
+      "Un aller-retour transatlantique coûte 80 à 120 ms : la géographie est incompressible, d'où le multi-région.",
+      "Actif-passif : bascule pilotée en minutes ; actif-actif : bascule instantanée mais écritures concurrentes à réconcilier.",
+      "L'intermédiaire courant : lecture dans chaque région, écriture unique dans la région mère de l'utilisateur.",
+      "Anycast : une même IP annoncée partout, BGP route au plus proche — et un runbook de bascule non testé est un runbook fictif.",
+    ],
     quiz: [
       {
         question: "Un aller-retour transatlantique coûte environ…",
@@ -1745,6 +1876,12 @@ export const COURSES: Course[] = [
       "thundering herd",
       "post-mortem sans blâme",
       "error budget",
+    ],
+    keyTakeaways: [
+      "Cascade type : dépendance lente → pools épuisés → service muet → les appelants s'empilent — ce sont les garde-fous manquants qui font l'outage.",
+      "Détecter sur les symptômes utilisateur (p95, erreurs, saturation) avant l'indisponibilité, en nommant service, rayon d'impact et métrique fautive.",
+      "Dégrader plutôt que tomber : feature flags, lecture seule, cache périmé — un mode dégradé non testé n'existe pas.",
+      "La reprise crée sa propre tempête (cache froid, thundering herd) : single-flight, préchauffage, vagues progressives — puis post-mortem sans blâme.",
     ],
     quiz: [
       {

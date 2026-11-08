@@ -29,7 +29,13 @@ export interface SimulationState {
   /** Contrôleur du run courant (interne, non exposé au contrat). */
   controller: AbortController | null;
 
-  run: (arch: ArchitectureData, architectureId: string | null) => Promise<void>;
+  run: (
+    arch: ArchitectureData,
+    architectureId: string | null,
+    /** Cours d'origine si la simulation lance un exercice (évaluation des
+     *  critères de réussite dans la vue résultats), sinon null/undefined. */
+    exerciseSlug?: string | null,
+  ) => Promise<void>;
   abort: () => void;
   reset: () => void;
 }
@@ -41,7 +47,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   result: null,
   controller: null,
 
-  run: async (arch, architectureId) => {
+  run: async (arch, architectureId, exerciseSlug) => {
     if (get().status === "running") return;
     const controller = new AbortController();
     set({ status: "running", progress: null, error: null, result: null, controller });
@@ -78,7 +84,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
         }
       }
 
-      useAppStore.getState().openResult(enriched);
+      useAppStore.getState().openResult(enriched, exerciseSlug ?? null);
       // Best-effort : jamais d'échec non géré pour l'appelant.
       useAppStore.getState().refreshSimulations().catch(() => undefined);
     } catch (error) {

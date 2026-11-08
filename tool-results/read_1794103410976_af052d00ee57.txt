@@ -1,0 +1,1826 @@
+     1→import type { Course, CourseLevel } from "@/types";
+     2→import { TEMPLATE_MAP } from "@/data/templates";
+     3→
+     4→/**
+     5→ * SystemLab — Parcours d'apprentissage : 23 cours de System Design en français.
+     6→ *
+     7→ * Structure : 7 cours débutant, 8 intermédiaires, 8 avancés.
+     8→ * Chaque cours contient des sections techniques réelles (définitions, ordres de
+     9→ * grandeur vérifiables, trade-offs), des concepts clés, un quiz de 3 questions
+    10→ * et — pour la plupart — un exercice practice branché sur un modèle
+    11→ * d'architecture de `src/data/templates.ts` (voir exercise.templateId).
+    12→ *
+    13→ * Invariant garanti ici : tout exercise.templateId existe dans TEMPLATE_MAP.
+    14→ */
+    15→
+    16→export const COURSES: Course[] = [
+    17→  /* ================================================================
+    18→   * DÉBUTANT (7)
+    19→   * ================================================================ */
+    20→  {
+    21→    slug: "client-serveur",
+    22→    title: "Le modèle client-serveur",
+    23→    level: "débutant",
+    24→    durationMin: 15,
+    25→    summary:
+    26→      "Le modèle fondateur de tout le Web : un client demande, un serveur répond. Concurrence, état, et ce qui rend un serveur scalable dès le premier jour.",
+    27→    sections: [
+    28→      {
+    29→        title: "Demander, traiter, répondre",
+    30→        content:
+    31→          "Un client émet une requête, un serveur la traite et renvoie une réponse. Le client peut être un navigateur, une application mobile ou un autre service ; le serveur écoute sur un port et répond. Presque tout le Web repose sur ce dialogue requête/réponse, du site statique aux plateformes à millions d'utilisateurs.",
+    32→      },
+    33→      {
+    34→        title: "Concurrence : combien de requêtes à la fois",
+    35→        content:
+    36→          "Un serveur ne traite pas les requêtes une par une : il accepte plusieurs connexions simultanées (threads, event loop, workers). Sa capacité vaut environ concurrence × 1000 / temps de réponse en ms : 64 requêtes en cours à 50 ms chacune donnent ~1 280 req/s. Au-delà, les demandes s'accumulent dans une file d'attente.",
+    37→      },
+    38→      {
+    39→        title: "Stateless : la clé pour grandir",
+    40→        content:
+    41→          "Un serveur stateless ne garde aucune mémoire des requêtes précédentes : n'importe quelle instance peut traiter n'importe quelle requête. C'est ce qui permet d'ajouter des machines derrière un répartiteur. L'état (sessions, paniers) est déporté vers Redis ou une base ; un serveur stateful (WebSocket, cache local) contraint le routage.",
+    42→      },
+    43→    ],
+    44→    concepts: ["client-serveur", "requête/réponse", "stateless", "concurrence", "loi de Little"],
+    45→    quiz: [
+    46→      {
+    47→        question: "Que signifie « stateless » pour un serveur ?",
+    48→        choices: [
+    49→          "Il ne conserve aucune donnée entre deux requêtes",
+    50→          "Il ne répond jamais aux clients",
+    51→          "Il stocke toutes les sessions en mémoire locale",
+    52→          "Il refuse les connexions simultanées",
+    53→        ],
+    54→        answer: 0,
+    55→        explanation:
+    56→          "Stateless = aucune mémoire des requêtes précédentes. N'importe quelle instance peut servir n'importe quel client : condition du scaling horizontal.",
+    57→      },
+    58→      {
+    59→        question:
+    60→          "Un serveur traite en moyenne 40 ms par requête et accepte 50 requêtes simultanées. Sa capacité est d'environ…",
+    61→        choices: ["40 req/s", "50 req/s", "1 250 req/s", "2 000 req/s"],
+    62→        answer: 2,
+    63→        explanation:
+    64→          "Capacité ≈ concurrence / latence = 50 / 0,04 = 1 250 req/s. C'est la loi de Little appliquée au débit d'un serveur.",
+    65→      },
+    66→      {
+    67→        question: "Où stocker les sessions utilisateur pour scaler horizontalement ?",
+    68→        choices: [
+    69→          "Dans la mémoire du serveur applicatif",
+    70→          "Dans un stockage partagé type Redis ou base de données",
+    71→          "Dans un cookie non signé côté client uniquement",
+    72→          "Dans les logs applicatifs",
+    73→        ],
+    74→        answer: 1,
+    75→        explanation:
+    76→          "Un stockage partagé (Redis, base) rend toutes les instances interchangeables ; la mémoire locale imposerait des sessions collantes.",
+    77→      },
+    78→    ],
+    79→  },
+    80→  {
+    81→    slug: "http",
+    82→    title: "HTTP et HTTPS de fond en comble",
+    83→    level: "débutant",
+    84→    durationMin: 15,
+    85→    summary:
+    86→      "Méthodes, codes de statut, TLS, HTTP/2 : la grammaire des échanges qui portent vos requêtes, et les réflexes (timeouts, idempotence) qui évitent les catastrophes.",
+    87→    sections: [
+    88→      {
+    89→        title: "Anatomie d'un échange HTTP",
+    90→        content:
+    91→          "Chaque requête porte une méthode (GET, POST, PUT, PATCH, DELETE), un chemin, des en-têtes et parfois un corps ; la réponse renvoie un code de statut. Les codes se lisent par famille : 2xx succès, 3xx redirection, 4xx erreur du client, 5xx erreur du serveur. 200, 404 et 503 sont les plus fréquents en production.",
+    92→      },
+    93→      {
+    94→        title: "HTTPS : chiffrement et identité",
+    95→        content:
+    96→          "HTTPS encapsule HTTP dans TLS : le trafic est chiffré et le serveur prouve son identité via un certificat. Le handshake TLS 1.3 coûte un aller-retour (0-RTT en reprise). Chaque aller-retour réseau coûte 10 à 100 ms selon la distance : limiter les allers-retours compte autant que compresser les contenus.",
+    97→      },
+    98→      {
+    99→        title: "HTTP/1.1, HTTP/2, HTTP/3",
+   100→        content:
+   101→          "HTTP/1.1 sérialise les requêtes d'une même connexion (blocage en tête de file) ; HTTP/2 multiplexe plusieurs flux sur une seule connexion TCP ; HTTP/3 pose HTTP sur QUIC (UDP) pour supprimer le blocage au niveau transport. Les connexions persistantes (keep-alive) évitent de payer TCP + TLS complet à chaque requête.",
+   102→      },
+   103→      {
+   104→        title: "Timeouts et idempotence",
+   105→        content:
+   106→          "GET, PUT et DELETE sont idempotents : les rejouer donne le même état. POST ne l'est pas : un retry peut créer une commande en double — d'où les clés d'idempotence. Côté client, chaque requête doit avoir un timeout ; côté serveur, 408 et 504 signalent un dépassement, 429 une limitation de débit.",
+   107→      },
+   108→    ],
+   109→    concepts: ["HTTP", "codes de statut", "TLS", "HTTP/2", "idempotence"],
+   110→    quiz: [
+   111→      {
+   112→        question: "Un serveur renvoie 503. Que signifie ce code ?",
+   113→        choices: [
+   114→          "La ressource n'existe pas",
+   115→          "Le client n'est pas authentifié",
+   116→          "Le service est indisponible ou surchargé",
+   117→          "La requête est mal formée",
+   118→        ],
+   119→        answer: 2,
+   120→        explanation:
+   121→          "5xx = erreur côté serveur ; 503 Service Unavailable signale le plus souvent une saturation ou une maintenance.",
+   122→      },
+   123→      {
+   124→        question: "Quelle méthode n'est PAS idempotente ?",
+   125→        choices: ["GET", "PUT", "DELETE", "POST"],
+   126→        answer: 3,
+   127→        explanation:
+   128→          "Rejouer un POST peut dupliquer l'effet (double commande). GET, PUT et DELETE laissent l'état inchangé après un second appel.",
+   129→      },
+   130→      {
+   131→        question: "Le principal apport d'HTTP/2 est…",
+   132→        choices: [
+   133→          "Le chiffrement obligatoire",
+   134→          "Le multiplexage des requêtes sur une seule connexion",
+   135→          "La suppression des codes d'erreur",
+   136→          "Un en-tête User-Agent obligatoire",
+   137→        ],
+   138→        answer: 1,
+   139→        explanation:
+   140→          "HTTP/2 multiplexe plusieurs flux en parallèle sur une connexion TCP, supprimant le blocage en tête de file d'HTTP/1.1.",
+   141→      },
+   142→    ],
+   143→  },
+   144→  {
+   145→    slug: "api-rest",
+   146→    title: "Concevoir une API REST solide",
+   147→    level: "débutant",
+   148→    durationMin: 20,
+   149→    summary:
+   150→      "Concevoir une API que d'autres peuvent consommer sans souffrir : ressources, pagination, erreurs structurées, versioning — et le piège classique du N+1.",
+   151→    sections: [
+   152→      {
+   153→        title: "Des ressources et des verbes",
+   154→        content:
+   155→          "REST modélise l'API autour de ressources identifiées par des URI (/users/42/orders) manipulées avec les verbes HTTP. GET lit sans modifier, POST crée, PUT remplace, DELETE supprime. Une API REST bien conçue est prévisible : la structure de l'URI raconte la hiérarchie, les codes de statut racontent le résultat.",
+   156→      },
+   157→      {
+   158→        title: "Pagination, filtrage, tri",
+   159→        content:
+   160→          "Jamais de réponse non bornée : paginer, filtrer et trier côté serveur. L'offset re-scanne les premières lignes et devient lent au-delà de quelques milliers d'éléments ; la pagination par curseur (WHERE id > dernier_id) reste constante en temps. Une liste non paginée est un incident de production en sursis.",
+   161→      },
+   162→      {
+   163→        title: "Le problème N+1",
+   164→        content:
+   165→          "Récupérer une liste puis une ressource liée par élément multiplie les allers-retours : 1 liste + N détails = N+1 requêtes, chacune avec sa latence. On l'évite côté API avec des inclusions (?include=orders) ou côté consommateur avec un BFF. Le remède serveur : jointures, vues ou batch loading.",
+   166→      },
+   167→      {
+   168→        title: "Erreurs structurées et versioning",
+   169→        content:
+   170→          "Les erreurs doivent être stables et lisibles par machine : code, message humain, champs concernés. Versionner dès le premier consommateur externe (/v1/ ou en-tête) car retirer un champ casse des clients que vous ne contrôlez pas. 429 accompagne les quotas ; les clés d'idempotence sécurisent les POST rejoués.",
+   171→      },
+   172→    ],
+   173→    concepts: ["REST", "ressource", "pagination par curseur", "problème N+1", "versioning", "clé d'idempotence"],
+   174→    quiz: [
+   175→      {
+   176→        question: "GET /users/42 renvoie 200. Après DELETE /users/42, GET /users/42 renvoie…",
+   177→        choices: ["200 puis 500", "204 puis 404", "404 puis 404", "301 puis 200"],
+   178→        answer: 1,
+   179→        explanation:
+   180→          "La suppression réussit sans corps de réponse (204) ; ensuite la ressource n'existe plus : 404 Not Found.",
+   181→      },
+   182→      {
+   183→        question: "Une liste renvoie 10 000 objets en une seule réponse. Quel risque immédiat ?",
+   184→        choices: [
+   185→          "Aucun, c'est le travail de l'API",
+   186→          "Latence, mémoire et timeouts côté client comme serveur",
+   187→          "Un code 404 systématique",
+   188→          "La perte des en-têtes HTTP",
+   189→        ],
+   190→        answer: 1,
+   191→        explanation:
+   192→          "Sans pagination, charge réseau et mémoire, sérialisation et temps de réponse explosent des deux côtés : il faut paginer.",
+   193→      },
+   194→      {
+   195→        question: "Le problème N+1 se produit quand…",
+   196→        choices: [
+   197→          "Un seul appel renvoie N objets",
+   198→          "On boucle sur une liste en émettant une requête par élément",
+   199→          "La base contient N index",
+   200→          "N clients partagent une connexion",
+   201→        ],
+   202→        answer: 1,
+   203→        explanation:
+   204→          "Chaque élément déclenche sa propre requête : N+1 allers-retours cumulent la latence et chargent la base.",
+   205→      },
+   206→    ],
+   207→  },
+   208→  {
+   209→    slug: "bases-de-donnees",
+   210→    title: "Bases de données : ce qui décide de la vitesse",
+   211→    level: "débutant",
+   212→    durationMin: 25,
+   213→    summary:
+   214→      "Index, transactions, connexions : les mécanismes qui décident réellement de la vitesse d'une base, avec les ordres de grandeur à connaître avant de crier « la base est lente ».",
+   215→    sections: [
+   216→      {
+   217→        title: "SQL ou NoSQL : choisir selon les requêtes",
+   218→        content:
+   219→          "Une base relationnelle (PostgreSQL, MySQL) garantit des transactions ACID et des requêtes riches avec jointures : idéale pour les données transactionnelles. Le NoSQL spécialise : clé-valeur (Redis) pour la vitesse, document (MongoDB) pour les objets flexibles, wide-column (Cassandra) pour le volume d'écriture. On choisit selon les requêtes dominantes.",
+   220→      },
+   221→      {
+   222→        title: "Index : la différence entre 8 ms et 8 s",
+   223→        content:
+   224→          "Sans index, un SELECT parcourt toute la table (scan séquentiel). Un index B-tree répond en O(log n) : quelques lectures de pages suffisent, typiquement 1 à 10 ms par lecture indexée. Chaque index accélère les lectures mais ralentit chaque écriture et occupe de l'espace : on indexe les colonnes filtrées et triées, pas tout.",
+   225→      },
+   226→      {
+   227→        title: "Écritures et transactions",
+   228→        content:
+   229→          "Une écriture durable traverse le journal (WAL) avec fsync : 5 à 35 ms selon le stockage. Les transactions regroupent des opérations et les rendent atomiques ; le niveau d'isolation (read committed, serializable) définit ce que les transactions concurrentes peuvent voir. Verrous et dimensionnement des connexions font le reste.",
+   230→      },
+   231→      {
+   232→        title: "Connexions : le goulot silencieux",
+   233→        content:
+   234→          "Chaque instance n'accepte qu'un nombre limité de connexions (souvent 100 à 500) ; au-delà, les clients attendent. Un pool (PgBouncer, pool applicatif) multiplexe des milliers de requêtes clientes sur quelques dizaines de connexions réelles. Capacité d'une base ≈ connexions × 1000 / temps moyen en ms.",
+   235→      },
+   236→    ],
+   237→    concepts: ["ACID", "index B-tree", "WAL", "pool de connexions", "isolation"],
+   238→    quiz: [
+   239→      {
+   240→        question: "Qu'est-ce qu'une transaction ACID ?",
+   241→        choices: [
+   242→          "Une requête particulièrement rapide",
+   243→          "Un groupe d'opérations atomiques, cohérentes, isolées et durables",
+   244→          "Un index composite multi-colonnes",
+   245→          "Une sauvegarde planifiée",
+   246→        ],
+   247→        answer: 1,
+   248→        explanation:
+   249→          "Atomicity, Consistency, Isolation, Durability : tout ou rien, état valide, isolation entre transactions, persistance au commit.",
+   250→      },
+   251→      {
+   252→        question: "Pourquoi un index B-tree accélère-t-il les lectures ?",
+   253→        choices: [
+   254→          "Il compresse la table",
+   255→          "Il stocke les clés triées : la recherche descend en O(log n) au lieu de tout parcourir",
+   256→          "Il duplique la base en mémoire",
+   257→          "Il supprime les jointures",
+   258→        ],
+   259→        answer: 1,
+   260→        explanation:
+   261→          "La structure arborescente triée ne visite que quelques pages par requête, là où le scan séquentiel lit toute la table.",
+   262→      },
+   263→      {
+   264→        question: "À quoi sert un pool de connexions (PgBouncer) ?",
+   265→        choices: [
+   266→          "À sauvegarder la base",
+   267→          "À multiplexer des milliers de clients sur peu de connexions réelles",
+   268→          "À créer des index automatiquement",
+   269→          "À répliquer les écritures",
+   270→        ],
+   271→        answer: 1,
+   272→        explanation:
+   273→          "Le pool ouvre peu de connexions coûteuses vers la base et les partage entre clients, évitant l'attente au-delà de max_connections.",
+   274→      },
+   275→    ],
+   276→  },
+   277→  {
+   278→    slug: "cache-fondamental",
+   279→    title: "Le cache, fondamentalement",
+   280→    level: "débutant",
+   281→    durationMin: 20,
+   282→    summary:
+   283→      "Dix fois moins de latence sur les lectures chaudes : hits, misses, invalidation et éviction. Le cache est simple — jusqu'au jour où il ment.",
+   284→    sections: [
+   285→      {
+   286→        title: "Trois ordres de grandeur",
+   287→        content:
+   288→          "Lire en mémoire vive coûte environ 0,1 à 1 ms ; lire une ligne indexée sur disque via une base, 5 à 15 ms. Un cache en mémoire (Redis, Memcached) sert les lectures répétées 10 à 100 fois plus vite et protège la base : avec 75 % de hits, la base ne voit que le quart du trafic de lecture.",
+   289→      },
+   290→      {
+   291→        title: "Cache-aside : le pattern par défaut",
+   292→        content:
+   293→          "L'application lit d'abord le cache ; sur miss, elle interroge la base puis remplit le cache avec un TTL. Le TTL borne l'obsolescence et sert de filet de sécurité. Les écritures se négocient : write-through (cache et base synchrones, écritures lentes) ou write-around (base seule, le cache se réchauffe aux lectures).",
+   294→      },
+   295→      {
+   296→        title: "Invalidation : le problème difficile",
+   297→        content:
+   298→          "Un cache accélère en servant des données qui peuvent devenir fausses. Invalider trop tard : données obsolètes ; trop tôt : bénéfice perdu. Les invalidations ciblées (par clé, par tag) sont précises mais complexes ; le TTL est simple mais approximatif. Un cache qui tombe révèle 100 % de misses d'un coup : c'est la cache stampede.",
+   299→      },
+   300→      {
+   301→        title: "Éviction et working set",
+   302→        content:
+   303→          "Quand la mémoire est pleine, il faut chasser : LRU évince la clé la moins récemment utilisée, LFU la moins fréquente. allkeys-lru convient à un cache généraliste ; volatile-lru n'évince que les clés avec TTL ; no-eviction rejette les écritures. Même logique côté CDN : 85 % de hit veut dire 15 % du trafic statique atteint l'origine.",
+   304→      },
+   305→    ],
+   306→    concepts: ["cache-aside", "TTL", "éviction LRU", "taux de hit", "cache stampede"],
+   307→    quiz: [
+   308→      {
+   309→        question: "Le pattern cache-aside consiste à…",
+   310→        choices: [
+   311→          "Écrire systématiquement dans le cache et la base en même temps",
+   312→          "Lire le cache puis, sur miss, lire la base et remplir le cache",
+   313→          "Ne jamais écrire dans le cache",
+   314→          "Synchroniser les caches de toutes les instances",
+   315→        ],
+   316→        answer: 1,
+   317→        explanation:
+   318→          "Cache-aside : l'application gère la lecture et le remplissage, le TTL encadre l'obsolescence des données.",
+   319→      },
+   320→      {
+   321→        question: "Un Redis de 8 Go reçoit un working set de 20 Go. Que se passe-t-il ?",
+   322→        choices: [
+   323→          "Redis refuse toutes les écritures",
+   324→          "Les clés les moins utilisées sont évincées (LRU) : le taux de hit baisse",
+   325→          "Redis écrit le surplus sur disque automatiquement",
+   326→          "Rien : Redis compresse les données",
+   327→        ],
+   328→        answer: 1,
+   329→        explanation:
+   330→          "Avec allkeys-lru, l'excédent est évincé et des clés utiles disparaissent : il faut plus de mémoire ou un working set plus petit.",
+   331→      },
+   332→      {
+   333→        question: "Qu'est-ce qu'une cache stampede ?",
+   334→        choices: [
+   335→          "Une invalidation massive par erreur humaine",
+   336→          "Un pic soudain de misses qui frappe la base de plein fouet",
+   337→          "Un pic de hit rate",
+   338→          "Une corruption du cache",
+   339→        ],
+   340→        answer: 1,
+   341→        explanation:
+   342→          "Expiration simultanée ou panne du cache : des milliers de requêtes descendent d'un coup vers la base. On l'atténue par du jitter sur les TTL ou un verrou de rechargement.",
+   343→      },
+   344→    ],
+   345→    exercise: {
+   346→      title: "Réduire la latence avec un cache Redis",
+   347→      goal:
+   348→        "À partir du modèle « API scalable », régler le cache Redis (taux de hit, mémoire) pour absorber les lectures et faire chuter la latence p95 sous la barre des 600 ms.",
+   349→      constraints: [
+   350→        "Ne pas supprimer le composant Redis",
+   351→        "PostgreSQL conservé en bout de chaîne",
+   352→        "Scénario par défaut : 3 500 req/s, 80 % de lectures",
+   353→      ],
+   354→      templateId: "api-scalable",
+   355→      successCriteria: [
+   356→        { metric: "cacheHitRate", op: ">=", value: 0.7 },
+   357→        { metric: "p95Ms", op: "<=", value: 600 },
+   358→      ],
+   359→    },
+   360→  },
+   361→  {
+   362→    slug: "load-balancing",
+   363→    title: "Load balancing : répartir pour régner",
+   364→    level: "débutant",
+   365→    durationMin: 20,
+   366→    summary:
+   367→      "Répartir le trafic entre plusieurs serveurs : L4 contre L7, algorithmes de répartition et health checks — la première brique de toute architecture scalable.",
+   368→    sections: [
+   369→      {
+   370→        title: "Pourquoi un répartiteur",
+   371→        content:
+   372→          "Un load balancer place le trafic entrant sur plusieurs serveurs : capacité additionnée (N serveurs ≈ N fois le débit), redondance (une machine morte est évacuée) et déploiements sans coupure. Sans lui, le seul scaling possible est vertical : une machine plus grosse, vite plafonnée et jamais redondante. C'est la première brique qui fait grandir.",
+   373→      },
+   374→      {
+   375→        title: "L4 ou L7 : où lire la requête",
+   376→        content:
+   377→          "Un L7 (application) inspecte HTTP : il route par chemin, par en-tête, termine TLS et coûte 1 à 5 ms. Un L4 (transport) distribue les paquets TCP sans les lire : plus rapide, moins malin. Le L4 ne peut pas router /api vers un pool et /images vers un autre ; le L7 le fait mais consomme davantage. En pratique : L7 devant les services.",
+   378→      },
+   379→      {
+   380→        title: "Algorithmes de répartition",
+   381→        content:
+   382→          "Round Robin tourne circulairement — simple, mais ignore la charge réelle. Least Connections envoie vers le serveur le moins occupé : robuste quand les requêtes ont des durées variées. IP Hash dirige un même client vers le même serveur (sessions collantes) : pratique pour l'état local, risqué si la population cliente est déséquilibrée.",
+   383→      },
+   384→      {
+   385→        title: "Health checks : la santé avant tout",
+   386→        content:
+   387→          "Le répartiteur sonde ses cibles (HTTP /health, TCP) et retire celles qui échouent : le trafic bascule en quelques secondes. Sans health check, la moitié des requêtes part vers un serveur mort. Le répartiteur lui-même doit être redondé (paire active/passive) — sinon il devient le point de défaillance unique qu'il devait supprimer.",
+   388→      },
+   389→    ],
+   390→    concepts: ["L4 vs L7", "round-robin", "least-connections", "health check", "point de défaillance unique"],
+   391→    quiz: [
+   392→      {
+   393→        question: "Quelle différence entre un load balancer L4 et L7 ?",
+   394→        choices: [
+   395→          "Le L4 est plus lent",
+   396→          "Le L4 route au niveau TCP sans lire HTTP ; le L7 inspecte les requêtes applicatives",
+   397→          "Le L7 ne gère pas TLS",
+   398→          "Aucune, c'est du marketing",
+   399→        ],
+   400→        answer: 1,
+   401→        explanation:
+   402→          "L4 = transport (flux bruts, très rapide) ; L7 = application (routes, en-têtes, terminaison TLS, un peu plus de latence).",
+   403→      },
+   404→      {
+   405→        question: "Quel algorithme convient quand les requêtes ont des durées très variées ?",
+   406→        choices: ["Round Robin", "Least Connections", "IP Hash", "Random pur"],
+   407→        answer: 1,
+   408→        explanation:
+   409→          "Least Connections tient compte des requêtes en cours : les serveurs occupés par des traitements longs reçoivent moins de nouveau travail.",
+   410→      },
+   411→      {
+   412→        question: "Un load balancer unique devant 20 serveurs est…",
+   413→        choices: [
+   414→          "Optimal : simple et rapide",
+   415→          "Un point de défaillance unique",
+   416→          "Redondant par construction",
+   417→          "Impossible en HTTP",
+   418→        ],
+   419→        answer: 1,
+   420→        explanation:
+   421→          "S'il tombe, tout tombe. On le double (paire actif/passif) : le risque existe toujours mais il est maîtrisé, pas concentré.",
+   422→      },
+   423→    ],
+   424→    exercise: {
+   425→      title: "Équilibrer un pool applicatif",
+   426→      goal:
+   427→        "À partir du modèle « Application trois tiers », régler le Load Balancer L7 et le pool d'API pour absorber 1 500 req/s en gardant une p95 maîtrisée.",
+   428→      constraints: [
+   429→        "Conserver le Load Balancer L7",
+   430→        "Pas plus de 50 instances applicatives au total",
+   431→        "PostgreSQL unique en bout de chaîne",
+   432→      ],
+   433→      templateId: "three-tier",
+   434→      successCriteria: [
+   435→        { metric: "servedRps", op: ">=", value: 1400 },
+   436→        { metric: "p95Ms", op: "<=", value: 500 },
+   437→      ],
+   438→    },
+   439→  },
+   440→  {
+   441→    slug: "latence-et-debit",
+   442→    title: "Latence et débit : mesurer honnêtement",
+   443→    level: "débutant",
+   444→    durationMin: 15,
+   445→    summary:
+   446→      "p95, saturation, files d'attente : les métriques qui décrivent honnêtement un système, et la loi de Little qui relie tout.",
+   447→    sections: [
+   448→      {
+   449→        title: "Deux métriques, deux questions",
+   450→        content:
+   451→          "La latence mesure le temps d'une requête (ms) ; le débit compte les requêtes par seconde. On les confond parce qu'elles se dégradent ensemble : quand un serveur sature, sa file grandit et chaque requête attend plus. Un système peut être rapide et peu endurant, ou endurant et lent — il faut piloter les deux indicateurs.",
+   452→      },
+   453→      {
+   454→        title: "Percentiles : la vérité est dans la queue",
+   455→        content:
+   456→          "La moyenne masque les malheureux : p95 signifie que 95 % des requêtes sont plus rapides. Sur 10 000 requêtes, le p99 concerne 100 utilisateurs réels. Les SLO sérieux s'écrivent en percentiles (p95 < 300 ms). Attention : les percentiles ne se moyennent pas — agrégés naïvement, ils mentent.",
+   457→      },
+   458→      {
+   459→        title: "Saturation et files d'attente",
+   460→        content:
+   461→          "L'utilisation ρ = débit entrant / capacité. Tant que ρ < 0,7, l'attente reste faible ; à 0,9 elle explose : chaque requête arrive derrière d'autres. La loi de Little relie le tout : longueur de file = débit × attente. On dimensionne à 70-80 % d'utilisation, jamais à 100 %.",
+   462→      },
+   463→      {
+   464→        title: "La latence de bout en bout",
+   465→        content:
+   466→          "Une requête traverse le réseau, le répartiteur, le serveur, la base : la latence totale est la somme des étages, plus l'attente qui s'y accumule. On optimise d'abord le terme dominant — un appel base à 120 ms écrase tout le reste. Mesurer avant d'optimiser, et mesurer côté client : c'est là que vit l'utilisateur.",
+   467→      },
+   468→    ],
+   469→    concepts: ["latence", "débit", "percentiles p95/p99", "loi de Little", "saturation"],
+   470→    quiz: [
+   471→      {
+   472→        question: "p95 = 250 ms signifie…",
+   473→        choices: [
+   474→          "La requête moyenne prend 250 ms",
+   475→          "95 % des requêtes sont servies en 250 ms ou moins",
+   476→          "5 % des requêtes échouent",
+   477→          "Le serveur traite 250 req/s",
+   478→        ],
+   479→        answer: 1,
+   480→        explanation:
+   481→          "Le percentile 95 borne la queue de distribution : au-delà se trouvent les 5 % de requêtes les plus lentes.",
+   482→      },
+   483→      {
+   484→        question: "Un serveur affiche une utilisation de 0,95. Que se passe-t-il ?",
+   485→        choices: [
+   486→          "Rien, il reste de la marge",
+   487→          "L'attente en file explose : la latence dérive",
+   488→          "Le débit double",
+   489→          "Les erreurs disparaissent",
+   490→        ],
+   491→        answer: 1,
+   492→        explanation:
+   493→          "Près de la saturation, chaque requête attend derrière les précédentes : la file croît et la latence s'envole.",
+   494→      },
+   495→      {
+   496→        question: "Selon la loi de Little, avec 2 000 req/s et 100 ms d'attente moyenne…",
+   497→        choices: [
+   498→          "La file moyenne vaut 200 requêtes",
+   499→          "La file moyenne vaut 20 requêtes",
+   500→          "Le débit vaut 20 req/s",
+   501→          "La latence vaut 2 s",
+   502→        ],
+   503→        answer: 0,
+   504→        explanation: "Longueur = débit × temps = 2 000 × 0,1 s = 200 requêtes en attente en moyenne.",
+   505→      },
+   506→    ],
+   507→    exercise: {
+   508→      title: "Cibler une p95 acceptable",
+   509→      goal:
+   510→        "À partir du modèle « API simple », jouer sur le temps de traitement et le nombre d'instances pour tenir une p95 basse sous 500 req/s.",
+   511→      constraints: [
+   512→        "Garder la chaîne utilisateur → API → PostgreSQL",
+   513→        "Ne pas modifier le scénario de trafic",
+   514→        "Coût mensuel raisonné : pas de 50 instances",
+   515→      ],
+   516→      templateId: "api-simple",
+   517→      successCriteria: [{ metric: "p95Ms", op: "<=", value: 600 }],
+   518→    },
+   519→  },
+   520→
+   521→  /* ================================================================
+   522→   * INTERMÉDIAIRE (8)
+   523→   * ================================================================ */
+   524→  {
+   525→    slug: "scaling-horizontal",
+   526→    title: "Scaling horizontal",
+   527→    level: "intermédiaire",
+   528→    durationMin: 25,
+   529→    summary:
+   530→      "Sortir l'état des serveurs, ajouter des machines, déplacer le goulot : la mécanique complète du scaling horizontal et ses limites.",
+   531→    sections: [
+   532→      {
+   533→        title: "En largeur plutôt qu'en hauteur",
+   534→        content:
+   535→          "Le scaling vertical achète une machine plus puissante : simple au début, plafonné vite (les plus grosses instances coûtent de façon super-linéaire) et sans redondance. Le scaling horizontal ajoute des machines standard derrière un répartiteur : capacité quasi linéaire, redondance incluse, coût prévisible. Contrepartie : l'état doit sortir des serveurs.",
+   536→      },
+   537→      {
+   538→        title: "Le pré-requis : stateless",
+   539→        content:
+   540→          "Pour que n'importe quelle instance serve n'importe quelle requête, l'état se partage : sessions dans Redis, fichiers dans le stockage objet, travaux dans des files. Un serveur qui garde de l'état local (cache mémoire, session) force les sessions collantes et ruine l'élasticité. Auditer l'état local est l'étape un de toute montée en charge.",
+   541→      },
+   542→      {
+   543→        title: "Le goulot se déplace",
+   544→        content:
+   545→          "Instances ajoutées, le répartiteur distribue… et la base sature : ses connexions et son CPU plafonnent avant l'applicatif. Réponses progressives : pool de connexions, cache pour les lectures, réplicas de lecture, puis sharding pour les écritures. Chaque étape déplace le goulot — il faut le mesurer à chaque fois pour savoir où frapper.",
+   546→      },
+   547→      {
+   548→        title: "Automatiser : autoscaling",
+   549→        content:
+   550→          "Un groupe d'instances s'étend selon une métrique (CPU, latence, file) et se réduit à vide. Pièges classiques : le délai de démarrage (1 à 3 minutes) laisse passer les pics courts ; le rétrécissement doit être progressif (drain des connexions). L'autoscaling optimise le coût, pas l'architecture : il multiplie ce qui existe, bon ou mauvais.",
+   551→      },
+   552→    ],
+   553→    concepts: ["stateless", "scaling vertical vs horizontal", "goulot d'étranglement", "autoscaling", "drain"],
+   554→    quiz: [
+   555→      {
+   556→        question: "Qu'est-ce qui bloque le scaling horizontal d'un serveur qui garde ses sessions en mémoire ?",
+   557→        choices: [
+   558→          "Rien du tout",
+   559→          "Toute instance ne peut pas servir tout client : il faut déporter l'état",
+   560→          "Le protocole HTTP l'interdit",
+   561→          "Le load balancer refuse les requêtes",
+   562→        ],
+   563→        answer: 1,
+   564→        explanation:
+   565→          "L'état local lie un client à une machine : on déporte les sessions (Redis) pour rendre les instances interchangeables.",
+   566→      },
+   567→      {
+   568→        question: "Après ajout d'instances, la p95 continue de monter. Où chercher ?",
+   569→        choices: [
+   570→          "Dans le répartiteur uniquement",
+   571→          "Dans la dépendance partagée (base, cache) devenue goulot",
+   572→          "Dans le navigateur des utilisateurs",
+   573→          "Nulle part : c'est normal",
+   574→        ],
+   575→        answer: 1,
+   576→        explanation:
+   577→          "Le goulot se déplace vers les ressources partagées : mesurer connexions, CPU et files côté base et cache.",
+   578→      },
+   579→      {
+   580→        question: "L'autoscaling règle surtout…",
+   581→        choices: [
+   582→          "La latence réseau entre régions",
+   583→          "Le coût et l'élasticité de la couche applicative",
+   584→          "La cohérence des données",
+   585→          "Les bugs applicatifs",
+   586→        ],
+   587→        answer: 1,
+   588→        explanation:
+   589→          "Il ajuste le nombre d'instances selon la charge ; il ne corrige ni le design, ni une dépendance saturée.",
+   590→      },
+   591→    ],
+   592→    exercise: {
+   593→      title: "Passer le cap des 3 000 req/s",
+   594→      goal:
+   595→        "À partir du modèle « API scalable », lever le goulot applicatif (instances, concurrence, cache) pour servir au moins 3 000 req/s sans dégrader la p95.",
+   596→      constraints: [
+   597→        "Conserver CDN et Load Balancer L7",
+   598→        "PostgreSQL et Redis uniques",
+   599→        "Coût mensuel ≤ 4 000 $",
+   600→      ],
+   601→      templateId: "api-scalable",
+   602→      successCriteria: [
+   603→        { metric: "servedRps", op: ">=", value: 3000 },
+   604→        { metric: "p95Ms", op: "<=", value: 800 },
+   605→        { metric: "errorRate", op: "<=", value: 0.02 },
+   606→      ],
+   607→    },
+   608→  },
+   609→  {
+   610→    slug: "replication",
+   611→    title: "Réplication des données",
+   612→    level: "intermédiaire",
+   613→    durationMin: 25,
+   614→    summary:
+   615→      "Copier les données pour lire plus et tomber moins : synchrone ou asynchrone, le lag, le failover — et les garanties qu'on achète ou qu'on perd.",
+   616→    sections: [
+   617→      {
+   618→        title: "Copier les données",
+   619→        content:
+   620→          "La réplication maintient des copies des données sur plusieurs nœuds : lectures réparties, tolérance aux pannes, latence géographique réduite. Le primaire reçoit les écritures et diffuse les changements aux réplicas (streaming, log shipping). Les lectures partent alors sur les réplicas — mais chaque copie introduit la question du décalage.",
+   621→      },
+   622→      {
+   623→        title: "Synchrone, asynchrone, semi-synchrone",
+   624→        content:
+   625→          "Asynchrone : le primaire confirme sans attendre les réplicas — rapide, mais une panne peut perdre les dernières écritures. Synchrone : le commit attend un ack de réplique — zéro perte (RPO 0), écriture plus lente, et si la réplique ne répond plus, tout bloque. Semi-synchrone : au moins un ack avec délai de grâce — le compromis courant.",
+   626→      },
+   627→      {
+   628→        title: "Le lag et ses illusions",
+   629→        content:
+   630→          "Le décalage de réplication va de quelques millisecondes à plusieurs secondes selon la charge. Conséquence vécue : l'utilisateur enregistre, recharge, et ne voit rien (read-your-writes cassé). Solutions : router ses propres lectures vers le primaire, attendre la position de réplication, ou garantir des lectures monotones par client.",
+   631→      },
+   632→      {
+   633→        title: "Failover : survivre au primaire",
+   634→        content:
+   635→          "Quand le primaire tombe, un réplique est promue (automatiquement via orchestrateur ou manuellement). Coûts : quelques secondes à quelques minutes d'indisponibilité d'écriture (RTO), éventuellement les transactions non répliquées (RPO). Pièges : split-brain (deux primaires) — d'où quorum et fencing — et la tempête de reconnexion après bascule.",
+   636→      },
+   637→    ],
+   638→    concepts: ["réplication synchrone/asynchrone", "RPO/RTO", "lag de réplication", "failover", "split-brain"],
+   639→    quiz: [
+   640→      {
+   641→        question: "Avec la réplication asynchrone, une panne du primaire peut…",
+   642→        choices: [
+   643→          "Corrompre tous les réplicas",
+   644→          "Perdre les dernières écritures non encore répliquées",
+   645→          "Accélérer les lectures",
+   646→          "Bloquer définitivement les écritures",
+   647→        ],
+   648→        answer: 1,
+   649→        explanation:
+   650→          "Les commits confirmés avant diffusion peuvent manquer aux réplicas : le RPO (perte maximale) n'est pas nul.",
+   651→      },
+   652→      {
+   653→        question: "RPO = 0 signifie…",
+   654→        choices: [
+   655→          "Aucune donnée ne peut être perdue lors d'une panne",
+   656→          "La panne dure zéro seconde",
+   657→          "Les réplicas sont en lecture seule",
+   658→          "Le lag est nul en permanence",
+   659→        ],
+   660→        answer: 0,
+   661→        explanation:
+   662→          "Recovery Point Objective nul : l'état répliqué inclut chaque écriture confirmée — ce qui exige une réplication synchrone.",
+   663→      },
+   664→      {
+   665→        question:
+   666→          "Un utilisateur écrit puis lit immédiatement sur un réplique en retard et ne voit pas sa donnée. C'est…",
+   667→        choices: [
+   668→          "Un bug du répartiteur",
+   669→          "Le problème read-your-writes",
+   670→          "Une transaction perdue",
+   671→          "Un split-brain",
+   672→        ],
+   673→        answer: 1,
+   674→        explanation:
+   675→          "Sa lecture est plus ancienne que son écriture : on route ses lectures vers le primaire ou on attend la position de réplication.",
+   676→      },
+   677→    ],
+   678→    exercise: {
+   679→      title: "Répliquer pour absorber les lectures",
+   680→      goal:
+   681→        "À partir du modèle « Déploiement multi-région », dimensionner les réplicas et le routage des lectures pour tenir 1 000 req/s avec un lag maîtrisé.",
+   682→      constraints: [
+   683→        "Le primaire PostgreSQL reste la source des écritures",
+   684→        "Réplique en lecture seule obligatoire en région B",
+   685→        "Ne pas toucher au routage global du Load Balancer",
+   686→      ],
+   687→      templateId: "multi-region",
+   688→      successCriteria: [
+   689→        { metric: "servedRps", op: ">=", value: 900 },
+   690→        { metric: "p95Ms", op: "<=", value: 700 },
+   691→      ],
+   692→    },
+   693→  },
+   694→  {
+   695→    slug: "sharding",
+   696→    title: "Sharding : couper les données en morceaux",
+   697→    level: "intermédiaire",
+   698→    durationMin: 30,
+   699→    summary:
+   700→      "Quand les écritures ne tiennent plus sur une machine : répartir les données en shards, choisir la clé, payer le prix des requêtes distribuées.",
+   701→    sections: [
+   702→      {
+   703→        title: "Pourquoi sharder",
+   704→        content:
+   705→          "Au-delà des réplicas, les écritures plafonnent : une seule machine ne peut pas tout absorber. Le sharding répartit les données entre nœuds selon une clé (user_id, hash de commande). Chaque shard ne voit qu'une fraction du volume — écritures et stockage se partagent. C'est la réponse des très gros systèmes, et le plus gros saut de complexité.",
+   706→      },
+   707→      {
+   708→        title: "Choisir la clé de sharding",
+   709→        content:
+   710→          "La clé détermine tout. Par intervalle (range) : requêtes par plage efficaces, mais zones chaudes (les utilisateurs récents sur le même shard). Par hash : répartition uniforme, mais les parcours ordonnés deviennent impossibles. Mauvaise clé = shard saturé pendant que les autres dorment. On duplique parfois les données sous plusieurs clés pour diverses requêtes.",
+   711→      },
+   712→      {
+   713→        title: "Le consistent hashing",
+   714→        content:
+   715→          "Répartir « clé → shard = hash % N » casse tout à chaque ajout de nœud. Le consistent hashing place clés et nœuds sur un anneau : ajouter un nœud ne déplace qu'environ 1/N des clés. Les nœuds virtuels (chaque serveur occupe plusieurs positions) affinent encore la répartition. C'est la mécanique derrière Cassandra et les partitions Kafka.",
+   716→      },
+   717→      {
+   718→        title: "Le prix à payer",
+   719→        content:
+   720→          "Les jointures cross-shard disparaissent : on dénormalise ou on agrège en scatter-gather (interroger tous les shards, fusionner) — coûteux. Les transactions multi-shard deviennent des sagas. Le re-sharding (re-équilibrer des millions de clés en production) est lourd : Vitess ou Citus l'automatisent partiellement. On sharde tard, mais volontairement.",
+   721→      },
+   722→    ],
+   723→    concepts: ["clé de sharding", "consistent hashing", "shard chaud", "scatter-gather", "re-sharding"],
+   724→    quiz: [
+   725→      {
+   726→        question: "Pourquoi hasher la clé plutôt que sharder par intervalles ?",
+   727→        choices: [
+   728→          "Pour accélérer les requêtes par plage",
+   729→          "Pour répartir uniformément les écritures entre shards",
+   730→          "Pour économiser du stockage",
+   731→          "Pour supprimer les index",
+   732→        ],
+   733→        answer: 1,
+   734→        explanation:
+   735→          "Le hash disperse les clés : pas de zone chaude. En contrepartie, les parcours ordonnés exigent un scatter-gather.",
+   736→      },
+   737→      {
+   738→        question: "Le consistent hashing résout…",
+   739→        choices: [
+   740→          "Les lectures sales",
+   741→          "La redistribution massive de clés à chaque ajout de nœud",
+   742→          "Les transactions distribuées",
+   743→          "La latence réseau",
+   744→        ],
+   745→        answer: 1,
+   746→        explanation:
+   747→          "Sur l'anneau, un nouveau nœud ne prend qu'une fraction contiguë : environ 1/N des clés migrent, pas toutes.",
+   748→      },
+   749→      {
+   750→        question: "Une requête doit agréger des données réparties sur tous les shards. Ce pattern s'appelle…",
+   751→        choices: ["Write-through", "Scatter-gather", "Cache-aside", "Bulkhead"],
+   752→        answer: 1,
+   753→        explanation:
+   754→          "On interroge chaque shard en parallèle puis on fusionne : latence = maximum des shards, coût = N requêtes.",
+   755→      },
+   756→    ],
+   757→    exercise: {
+   758→      title: "Partionner un flux d'événements",
+   759→      goal:
+   760→        "À partir du modèle « Plateforme de notifications », régler partitions et consommateurs pour absorber 2 000 événements/s malgré le profil de pic.",
+   761→      constraints: [
+   762→        "Le flux Kafka reste la colonne vertébrale",
+   763→        "Groupe de consommateurs avec au moins 4 instances",
+   764→        "Profil de trafic « spike » conservé",
+   765→      ],
+   766→      templateId: "notifications-platform",
+   767→      successCriteria: [
+   768→        { metric: "servedRps", op: ">=", value: 1800 },
+   769→        { metric: "errorRate", op: "<=", value: 0.02 },
+   770→      ],
+   771→    },
+   772→  },
+   773→  {
+   774→    slug: "files-de-messages",
+   775→    title: "Files de messages",
+   776→    level: "intermédiaire",
+   777→    durationMin: 25,
+   778→    summary:
+   779→      "Files et journaux pour découpler producteurs et consommateurs : lag, livraison au moins une fois, backpressure — le tampon entre deux rythmes.",
+   780→    sections: [
+   781→      {
+   782→        title: "Le tampon entre deux rythmes",
+   783→        content:
+   784→          "Une file de messages découple producteurs et consommateurs : le producteur dépose et repart ; le consommateur traite à son rythme. Le pic de 10 000 e-mails de campagne devient une file digérée par des workers — l'utilisateur, lui, a reçu sa confirmation en 50 ms. Prix à payer : le travail n'est pas fini quand la réponse part (cohérence à terme).",
+   785→      },
+   786→      {
+   787→        title: "File (queue) ou journal (log) ?",
+   788→        content:
+   789→          "Les queues (RabbitMQ, SQS) remettent un message à un consommateur du groupe, avec ack et ré-attribution : compétition, message traité une fois. Les logs (Kafka, Kinesis) gardent les messages dans des partitions ordonnées, relus autant que voulu pendant la rétention (typiquement 7 jours) : rejeu et consommateurs indépendants. On choisit la sémantique avant le produit.",
+   790→      },
+   791→      {
+   792→        title: "Livraison : au moins une fois",
+   793→        content:
+   794→          "Le couple pannes + ré-attribution rend la livraison « exactly-once » fragile et coûteuse : on assume au moins une fois et on rend les consommateurs idempotents (clé de déduplication, upsert). L'ordre est garanti par partition, pas globalement : les événements d'une même entité vont sur la même partition via la clé de partitionnement.",
+   795→      },
+   796→      {
+   797→        title: "Profondeur, backpressure et DLQ",
+   798→        content:
+   799→          "Une file a une profondeur maximale : au-delà, le producteur est rejeté (backpressure) — mieux vaut ralentir en amont que tout perdre. Les messages en échec répété (poison) finissent en file de lettres mortes (DLQ) pour inspection. Surveiller le consumer lag — profondeur restante / vitesse de consommation — est l'alerte numéro un.",
+   800→      },
+   801→    ],
+   802→    concepts: [
+   803→      "producteur/consommateur",
+   804→      "consumer lag",
+   805→      "at-least-once",
+   806→      "backpressure",
+   807→      "DLQ",
+   808→      "idempotence",
+   809→    ],
+   810→    quiz: [
+   811→      {
+   812→        question: "Que mesure le consumer lag ?",
+   813→        choices: [
+   814→          "La latence réseau des consommateurs",
+   815→          "Le nombre de messages en attente derrière la vitesse de consommation",
+   816→          "Le taux d'erreur des producteurs",
+   817→          "La taille des messages",
+   818→        ],
+   819→        answer: 1,
+   820→        explanation:
+   821→          "Lag = profondeur restante / débit de consommation : il croît quand les workers ne suivent plus — l'alerte clé d'un système asynchrone.",
+   822→      },
+   823→      {
+   824→        question: "Pourquoi l'ordre global des messages n'est-il pas garanti sur Kafka ?",
+   825→        choices: [
+   826→          "Kafka perd des messages",
+   827→          "L'ordre est garanti par partition, pas entre partitions",
+   828→          "Les producteurs écrivent en parallèle sur disque",
+   829→          "Les consommateurs désordonnent à la lecture",
+   830→        ],
+   831→        answer: 1,
+   832→        explanation:
+   833→          "Chaque partition est un journal ordonné ; l'ordre inter-partitions n'existe pas. On partitionne par entité pour l'ordre utile.",
+   834→      },
+   835→      {
+   836→        question: "Un message échoue systématiquement en consommation. Que faire ?",
+   837→        choices: [
+   838→          "Le réessayer indéfiniment",
+   839→          "L'envoyer en dead-letter queue et continuer",
+   840→          "Supprimer la file",
+   841→          "Redémarrer le broker",
+   842→        ],
+   843→        answer: 1,
+   844→        explanation:
+   845→          "Un poison message bloquerait la partition : la DLQ l'isole pour analyse pendant que le flux continue.",
+   846→      },
+   847→    ],
+   848→    exercise: {
+   849→      title: "Absorber un pic via une file",
+   850→      goal:
+   851→        "À partir du modèle « Application de messagerie », dimensionner la file et les workers pour que le chemin synchrone reste rapide malgré le volume d'événements.",
+   852→      constraints: [
+   853→        "La file de messages reste entre l'API et le worker",
+   854→        "Service e-mail conservé en sortie",
+   855→        "Scénario 800 req/s inchangé",
+   856→      ],
+   857→      templateId: "messagerie-app",
+   858→      successCriteria: [
+   859→        { metric: "p95Ms", op: "<=", value: 400 },
+   860→        { metric: "errorRate", op: "<=", value: 0.03 },
+   861→      ],
+   862→    },
+   863→  },
+   864→  {
+   865→    slug: "asynchronisme",
+   866→    title: "Asynchronisme : répondre maintenant, traiter plus tard",
+   867→    level: "intermédiaire",
+   868→    durationMin: 20,
+   869→    summary:
+   870→      "Répondre 202 et traiter en tâche de fond : polling, webhooks, cohérence à terme — et ce qui doit absolument rester synchrone.",
+   871→    sections: [
+   872→      {
+   873→        title: "Sortir le travail du chemin critique",
+   874→        content:
+   875→          "Traiter dans la requête HTTP (générer un PDF, appeler trois services) tient l'utilisateur et le serveur otages de la tâche la plus lente. L'asynchrone acquitte la demande (202 Accepted + identifiant de tâche) et traite en tâche de fond. La latence perçue passe de 12 s à 200 ms ; l'utilisateur suit la progression ou reçoit un webhook.",
+   876→      },
+   877→      {
+   878→        title: "Les patterns de complétion",
+   879→        content:
+   880→          "202 Accepted + ressource de statut (polling raisonnable avec backoff) ; webhook : le serveur appelle l'URL du client quand c'est fini (penser signature et idempotence) ; SSE/WebSocket pour le suivi en direct. Chaque pattern déplace la complexité : le polling garde le client simple, le webhook crée un point de rendez-vous à sécuriser.",
+   881→      },
+   882→      {
+   883→        title: "Ce que l'asynchrone ne règle pas",
+   884→        content:
+   885→          "Une chaîne asynchrone est cohérente à terme : états « en cours » visibles, échecs différés, retries à concevoir. La validation immédiate (formulaire invalide, paiement refusé) et les lectures attendent une réponse — les rendre asynchrones est une erreur. Règle : asynchrone pour le travail, synchrone pour la décision.",
+   886→      },
+   887→      {
+   888→        title: "Timeouts, retries, traçabilité",
+   889→        content:
+   890→          "Chaque appel garde son timeout, ses retries (backoff exponentiel + jitter) et sa clé d'idempotence. Les traces distribuées (trace ID propagé dans les messages) relient requête initiale et travaux différés — sans elles, déboguer un flux asynchrone relève de la spéléologie. Les files de priorité servent l'urgent avant les gros exports.",
+   891→      },
+   892→    ],
+   893→    concepts: ["202 Accepted", "webhook", "cohérence à terme", "retry backoff", "trace distribuée"],
+   894→    quiz: [
+   895→      {
+   896→        question: "Que répond une API qui accepte un travail sans le traiter immédiatement ?",
+   897→        choices: [
+   898→          "200 avec le résultat",
+   899→          "202 Accepted, souvent avec un identifiant de tâche",
+   900→          "404 immédiatement",
+   901→          "301 vers la file",
+   902→        ],
+   903→        answer: 1,
+   904→        explanation:
+   905→          "202 signifie « demande acceptée, traitement à venir » : le client suit ensuite la ressource de statut ou le webhook.",
+   906→      },
+   907→      {
+   908→        question: "Quel cas DOIT rester synchrone ?",
+   909→        choices: [
+   910→          "Générer un rapport de nuit",
+   911→          "Envoyer un e-mail de bienvenue",
+   912→          "Valider un paiement avant de confirmer la commande",
+   913→          "Redimensionner des images",
+   914→        ],
+   915→        answer: 2,
+   916→        explanation:
+   917→          "La décision (refuser/accepter) doit être immédiate et cohérente ; le travail différé ne convient pas à la validation.",
+   918→      },
+   919→      {
+   920→        question: "Pourquoi ajouter du jitter aux retries exponentiels ?",
+   921→        choices: [
+   922→          "Pour accélérer les retries",
+   923→          "Pour éviter que tous les clients réessaient en même temps",
+   924→          "Pour économiser la bande passante",
+   925→          "C'est un artefact des anciens protocoles",
+   926→        ],
+   927→        answer: 1,
+   928→        explanation:
+   929→          "Sans jitter, les retries synchronisés saturent la dépendance à chaque cycle (thundering herd) ; le hasard désynchronise.",
+   930→      },
+   931→    ],
+   932→    exercise: {
+   933→      title: "Sortir le travail du chemin critique",
+   934→      goal:
+   935→        "À partir du modèle « Application de messagerie », faire du chemin synchrone un simple acquittement : l'API persiste, la file et les workers font le reste.",
+   936→      constraints: [
+   937→        "L'API ne doit plus attendre le worker pour répondre",
+   938→        "Les notifications doivent partir via la file",
+   939→        "Aucune perte de messages acceptée",
+   940→      ],
+   941→      templateId: "messagerie-app",
+   942→      successCriteria: [
+   943→        { metric: "p95Ms", op: "<=", value: 350 },
+   944→        { metric: "errorRate", op: "<=", value: 0.02 },
+   945→      ],
+   946→    },
+   947→  },
+   948→  {
+   949→    slug: "rate-limiting",
+   950→    title: "Rate limiting",
+   951→    level: "intermédiaire",
+   952→    durationMin: 20,
+   953→    summary:
+   954→      "429 plutôt que 503 : plafonner le débit par client avec token bucket ou fenêtre glissante, et calibrer les seuils sur la capacité réelle du système.",
+   955→    sections: [
+   956→      {
+   957→        title: "Une porte à taille contrôlée",
+   958→        content:
+   959→          "Le rate limiting plafonne le débit par client (req/s, requêtes/jour) : protège les ressources, contient les abus, garantit l'équité. Un refus propre (429 Too Many Requests + Retry-After) vaut mieux qu'un 503 aléatoire trois minutes plus tard : le client saura quand revenir, le service restera debout.",
+   960→      },
+   961→      {
+   962→        title: "Les quatre algorithmes",
+   963→        content:
+   964→          "Fenêtre fixe : compteur remis à zéro par tranche — simple, mais rafale doublée à la frontière des fenêtres. Fenêtre glissante : moyenne sur la fenêtre — lisse. Token bucket : jetons ajoutés au taux r, seau de capacité b — autorise les rafales contrôlées. Leaky bucket : file vidée à débit fixe — lisse parfaitement la sortie.",
+   965→      },
+   966→      {
+   967→        title: "Limiter où, compter quoi",
+   968→        content:
+   969→          "À la passerelle (compteur global par clé d'API, en Redis avec INCR + EXPIRE ou fenêtre triée), par utilisateur, par route — les seuils diffèrent (lecture généreuse, écriture comptée). En distribué, les compteurs doivent être partagés : chaque instance qui compte seule en mémoire laisse passer N fois la limite.",
+   970→      },
+   971→      {
+   972→        title: "Dimensionner les seuils",
+   973→        content:
+   974→          "Le seuil se calibre sur la capacité avec marge : limiter à 70-80 % du débit réellement tenu (charge de référence + p95 cible). Quotas par palier (gratuit/premium) côté business, limites de sécurité côté système (taille de requête, connexions). Attention aux pics alignés sur la remise à zéro des quotas.",
+   975→      },
+   976→    ],
+   977→    concepts: ["token bucket", "fenêtre glissante", "429", "quota", "compteurs distribués"],
+   978→    quiz: [
+   979→      {
+   980→        question: "Que renvoie une API qui refuse une requête à cause du débit ?",
+   981→        choices: ["403 Forbidden", "429 Too Many Requests", "503 Service Unavailable", "400 Bad Request"],
+   982→        answer: 1,
+   983→        explanation:
+   984→          "429 signale la limite atteinte ; l'en-tête Retry-After indique au client quand réessayer.",
+   985→      },
+   986→      {
+   987→        question: "Le token bucket se caractérise par…",
+   988→        choices: [
+   989→          "Un compteur remis à zéro chaque minute",
+   990→          "Un débit moyen r et une capacité de rafale b",
+   991→          "Une file d'attente sans limite",
+   992→          "Une limite par adresse IP uniquement",
+   993→        ],
+   994→        answer: 1,
+   995→        explanation:
+   996→          "Les jetons se reconstituent à r/s ; le seau de b jetons absorbe les rafales : moyenne maîtrisée + pointes tolérées.",
+   997→      },
+   998→      {
+   999→        question: "Chaque instance compte ses requêtes en mémoire locale. La limite globale est…",
+  1000→        choices: ["Respectée", "Multipliée par le nombre d'instances", "Divisée par le nombre d'instances", "Aléatoire"],
+  1001→        answer: 1,
+  1002→        explanation:
+  1003→          "N compteurs indépendants = N fois la limite : il faut un comptoir partagé (Redis) pour une limite globale.",
+  1004→      },
+  1005→    ],
+  1006→    exercise: {
+  1007→      title: "Protéger un frontal e-commerce",
+  1008→      goal:
+  1009→        "À partir du modèle « Marketplace », ajouter et régler un limiteur de débit pour absorber les abus sans dégrader le trafic légitime.",
+  1010→      constraints: [
+  1011→        "Le chemin CDN → Load Balancer doit rester intact",
+  1012→        "Ajouter un composant de limitation de débit",
+  1013→        "Le profil ramp doit rester lissé",
+  1014→      ],
+  1015→      templateId: "marketplace",
+  1016→      successCriteria: [
+  1017→        { metric: "errorRate", op: "<=", value: 0.05 },
+  1018→        { metric: "p95Ms", op: "<=", value: 800 },
+  1019→      ],
+  1020→    },
+  1021→  },
+  1022→  {
+  1023→    slug: "resilience",
+  1024→    title: "Résilience : concevoir pour la défaillance",
+  1025→    level: "intermédiaire",
+  1026→    durationMin: 30,
+  1027→    summary:
+  1028→      "Timeouts, retries, circuit breakers, bulkheads : la boîte à garde-fous qui transforme une panne de dépendance en ralentissement tolérable.",
+  1029→    sections: [
+  1030→      {
+  1031→        title: "Tout tombe, tout le temps",
+  1032→        content:
+  1033→          "Une dépendance réseau échoue ou ralentit ; un déploiement dégrade un service ; un GC met un nœud en pause 3 s. Concevoir résilient, c'est supposer la défaillance et borner son impact : redondance des composants, isolation des dépendances, dégradation contrôlée plutôt que tout-ou-rien. La question n'est pas « si » mais « quand, et que se passe-t-il alors ».",
+  1034→      },
+  1035→      {
+  1036→        title: "Timeouts et retries : le socle",
+  1037→        content:
+  1038→          "Pas d'appel sans timeout : une dépendance lente est une dépendance morte qui occupe des ressources. Les retries ne s'appliquent qu'aux opérations idempotentes, avec backoff exponentiel + jitter, et un budget (ex. max 10 % du trafic en retry). Sinon, on relance du carburant sur l'incendie au lieu de l'éteindre.",
+  1039→      },
+  1040→      {
+  1041→        title: "Le circuit breaker",
+  1042→        content:
+  1043→          "Trois états : fermé (tout passe, on compte les erreurs), ouvert (au-delà du seuil — ex. 50 % d'erreurs sur 20 appels — tout échoue immédiatement), demi-ouvert (après le cooldown, quelques sondes testent). Effet : la dépendance malade n'est plus appelée, les ressources se libèrent, la cascade s'arrête. Fail-fast contre slow-death.",
+  1044→      },
+  1045→      {
+  1046→        title: "Bulkheads et fallbacks",
+  1047→        content:
+  1048→          "Bulkhead : cloisonner les pools de ressources par dépendance — la panne du service A n'épuise pas les threads du service B. Fallback : répondre dégradé plutôt que rien — données en cache, valeurs par défaut, message honnête. Un mode dégradé assumé (page produit sans recommandations) vaut mieux qu'une page d'erreur globale.",
+  1049→      },
+  1050→    ],
+  1051→    concepts: ["timeout", "backoff + jitter", "circuit breaker", "bulkhead", "fallback"],
+  1052→    quiz: [
+  1053→      {
+  1054→        question: "À quoi sert un circuit breaker ?",
+  1055→        choices: [
+  1056→          "À éteindre le service la nuit",
+  1057→          "À cesser d'appeler une dépendance défaillante pour éviter la cascade",
+  1058→          "À redémarrer automatiquement les serveurs",
+  1059→          "À chiffrer les appels internes",
+  1060→        ],
+  1061→        answer: 1,
+  1062→        explanation:
+  1063→          "Il détecte le taux d'erreur, ouvre le circuit (échec immédiat), puis teste la reprise progressivement : fail fast.",
+  1064→      },
+  1065→      {
+  1066→        question: "Quand peut-on rejouer une requête en erreur ?",
+  1067→        choices: [
+  1068→          "Toujours, c'est sans risque",
+  1069→          "Seulement si l'opération est idempotente, avec backoff et budget",
+  1070→          "Jamais",
+  1071→          "Uniquement les POST",
+  1072→        ],
+  1073→        answer: 1,
+  1074→        explanation:
+  1075→          "Un retry sur une opération non idempotente duplique l'effet ; sans budget ni jitter, les retries aggravent la surcharge.",
+  1076→      },
+  1077→      {
+  1078→        question: "Le pattern bulkhead consiste à…",
+  1079→        choices: [
+  1080→          "Répliquer les données",
+  1081→          "Cloisonner les ressources par dépendance pour limiter le rayon d'impact",
+  1082→          "Équilibrer la charge",
+  1083→          "Mettre en cache les erreurs",
+  1084→        ],
+  1085→        answer: 1,
+  1086→        explanation:
+  1087→          "Comme les compartiments étanches d'un navire : la panne d'une dépendance noie un pool, pas tout le navire.",
+  1088→      },
+  1089→    ],
+  1090→    exercise: {
+  1091→      title: "Empêcher la cascade",
+  1092→      goal:
+  1093→        "À partir du modèle « Système de paiement », régler timeouts et circuit breaker pour que la défaillance de la notification externe ne compromette pas l'encaissement.",
+  1094→      constraints: [
+  1095→        "Le Circuit Breaker doit protéger le service de notification",
+  1096→        "L'écriture transactionnelle reste synchrone",
+  1097→        "Injecter une panne (outage) sur la dépendance externe pendant la simulation",
+  1098→      ],
+  1099→      templateId: "payment-system",
+  1100→      successCriteria: [
+  1101→        { metric: "errorRate", op: "<=", value: 0.05 },
+  1102→        { metric: "p95Ms", op: "<=", value: 900 },
+  1103→      ],
+  1104→    },
+  1105→  },
+  1106→  {
+  1107→    slug: "observabilite",
+  1108→    title: "Observabilité : voir son système vivre",
+  1109→    level: "intermédiaire",
+  1110→    durationMin: 25,
+  1111→    summary:
+  1112→      "Logs, métriques, traces : les trois piliers, les listes RED et USE, des alertes qui veulent dire quelque chose — débugger en production sans y être aveugle.",
+  1113→    sections: [
+  1114→      {
+  1115→        title: "Les trois piliers",
+  1116→        content:
+  1117→          "Les logs capturent des événements discrets (requête rejetée, erreur applicative) — structurés en JSON, ils se requêtent. Les métriques agrègent dans le temps (req/s, p95, erreurs) — bon marché, idéales pour alerter. Les traces suivent une requête à travers les services, span par span. On débugge aux métriques, on comprend aux traces, on prouve aux logs.",
+  1118→      },
+  1119→      {
+  1120→        title: "RED et USE : les listes de courses",
+  1121→        content:
+  1122→          "Pour chaque service : RED — Rate (req/s), Errors (taux), Duration (p95/p99). Pour chaque ressource : USE — Utilization (CPU, disque), Saturation (files, pleine capacité), Errors. Ces listes évitent le « tout mesurer » : chaque tableau de bord commence par RED par service, puis USE sur les ressources chaudes. Un service sans RED est un angle mort.",
+  1123→      },
+  1124→      {
+  1125→        title: "Alerter sur les symptômes",
+  1126→        content:
+  1127→          "Alerter sur la cause (CPU élevé) réveille la nuit pour rien ; alerter sur le symptôme (p95 > SLO pendant 5 min, taux d'erreur multiplié) reflète la douleur utilisateur. Les SLO formalisent le niveau visé (99,9 % des requêtes < 400 ms) ; l'error budget arbitre vélocité contre fiabilité. Trop d'alertes = plus personne ne regarde.",
+  1128→      },
+  1129→      {
+  1130→        title: "Traces distribuées et échantillonnage",
+  1131→        content:
+  1132→          "Le trace ID se propage d'appel en appel (en-tête W3C traceparent) : la trace complète reconstitue le chemin. Sur fort trafic, on échantillonne — de tête (décision au premier saut, simple) ou de queue (garder les traces lentes et en erreur, plus utile). Un bon compromis : 1 à 10 % de base + 100 % des erreurs. La span la plus lente désigne souvent le coupable.",
+  1133→      },
+  1134→    ],
+  1135→    concepts: ["logs structurés", "métriques RED", "traces distribuées", "SLO et error budget", "échantillonnage"],
+  1136→    quiz: [
+  1137→      {
+  1138→        question: "Que signifie RED pour un service ?",
+  1139→        choices: [
+  1140→          "Redundancy, Encryption, Delivery",
+  1141→          "Rate, Errors, Duration",
+  1142→          "Replication, Event sourcing, Dedup",
+  1143→          "Retry, Exponential, Delay",
+  1144→        ],
+  1145→        answer: 1,
+  1146→        explanation: "RED = débit, erreurs, latence : les trois métriques minimales à surveiller pour chaque service.",
+  1147→      },
+  1148→      {
+  1149→        question: "Le trace ID sert à…",
+  1150→        choices: [
+  1151→          "Identifier un utilisateur",
+  1152→          "Relier les spans d'une même requête à travers les services",
+  1153→          "Trier les logs par niveau",
+  1154→          "Compter les erreurs",
+  1155→        ],
+  1156→        answer: 1,
+  1157→        explanation:
+  1158→          "Propagé d'appel en appel, il reconstitue le chemin complet d'une requête et localise la span responsable.",
+  1159→      },
+  1160→      {
+  1161→        question: "Un SLO de 99,9 % de disponibilité laisse quel error budget mensuel (30 jours) ?",
+  1162→        choices: ["≈ 43 minutes", "≈ 4 minutes", "≈ 7 heures", "≈ 30 secondes"],
+  1163→        answer: 0,
+  1164→        explanation:
+  1165→          "0,1 % de 43 200 minutes ≈ 43 minutes d'indisponibilité « autorisée » : c'est ce budget qui arbitre vitesse contre fiabilité.",
+  1166→      },
+  1167→    ],
+  1168→    exercise: {
+  1169→      title: "Instrumenter pour trouver le goulot",
+  1170→      goal:
+  1171→        "À partir du modèle « API scalable », utiliser la chaîne d'observabilité pour identifier et corriger le goulot sous 3 500 req/s.",
+  1172→      constraints: [
+  1173→        "Garder les quatre composants d'observabilité",
+  1174→        "Ne pas supprimer le Redis ni le PostgreSQL",
+  1175→        "Le diagnostic doit nommer le nœud responsable",
+  1176→      ],
+  1177→      templateId: "api-scalable",
+  1178→      successCriteria: [
+  1179→        { metric: "p95Ms", op: "<=", value: 700 },
+  1180→        { metric: "errorRate", op: "<=", value: 0.02 },
+  1181→      ],
+  1182→    },
+  1183→  },
+  1184→
+  1185→  /* ================================================================
+  1186→   * AVANCÉ (8)
+  1187→   * ================================================================ */
+  1188→  {
+  1189→    slug: "coherence-distribuee",
+  1190→    title: "Cohérence distribuée",
+  1191→    level: "avancé",
+  1192→    durationMin: 35,
+  1193→    summary:
+  1194→      "Linéarisable, causale, à terme : le spectre des cohérences distribuées, leurs garanties concrètes et leur prix en latence et en disponibilité.",
+  1195→    sections: [
+  1196→      {
+  1197→        title: "Fort ou faible : le spectre",
+  1198→        content:
+  1199→          "La cohérence linéarisable promet que toute lecture voit la dernière écriture, comme si les opérations s'exécutaient une à une : puissante, chère (coordination, quorum) et fragile sous partition. La cohérence à terme accepte des copies divergentes qui convergent ensuite : rapide et disponible, mais la lecture peut servir une valeur ancienne.",
+  1200→      },
+  1201→      {
+  1202→        title: "Les garanties intermédiaires",
+  1203→        content:
+  1204→          "Read-your-writes : vos propres lectures voient vos écritures (routage ou attente). Lectures monotones : ne jamais reculer dans le temps en changeant de réplique. Cohérence causale : les effets suivent leurs causes (la réponse après la question), via horloges vectorielles. Ces garanties de session coûtent peu et couvrent la plupart des besoins réels.",
+  1205→      },
+  1206→      {
+  1207→        title: "Écrire en concurrence : conflits",
+  1208→        content:
+  1209→          "Deux réplicas acceptent des écritures concurrentes sur la même clé : conflit. Résolutions : dernier-arrivé-gagne — simple mais perd des écritures silencieusement ; merge applicatif ; CRDT — structures qui convergent mathématiquement (compteurs, ensembles) ; ou sérialiser via un leader unique élu par consensus. Chaque option est un compromis expressivité/complexité.",
+  1210→      },
+  1211→      {
+  1212→        title: "Le prix de chaque niveau",
+  1213→        content:
+  1214→          "La cohérence forte ajoute de la coordination : un ack de quorum (majorité de 2f+1) coûte un aller-retour, et la minorité isolée doit refuser de servir. La cohérence à terme se paie en lectures anciennes, conflits à résoudre et UX à dessiner (« mise à jour en cours »). On choisit par type de donnée : solde bancaire fort, compteur de vues à terme.",
+  1215→      },
+  1216→    ],
+  1217→    concepts: ["linéarisabilité", "cohérence à terme", "read-your-writes", "cohérence causale", "CRDT", "quorum"],
+  1218→    quiz: [
+  1219→      {
+  1220→        question: "La cohérence à terme signifie…",
+  1221→        choices: [
+  1222→          "Les données ne changent jamais",
+  1223→          "Les réplicas divergent pendant les écritures puis convergent une fois au repos",
+  1224→          "Les écritures échouent toujours",
+  1225→          "Les lectures sont toujours vides",
+  1226→        ],
+  1227→        answer: 1,
+  1228→        explanation:
+  1229→          "Les copies divergent temporairement puis convergent : l'incohérence est bornée dans le temps, pas nulle.",
+  1230→      },
+  1231→      {
+  1232→        question: "Un CRDT est…",
+  1233→        choices: [
+  1234→          "Une base relationnelle",
+  1235→          "Une structure de données qui converge malgré les écritures concurrentes",
+  1236→          "Un protocole de consensus",
+  1237→          "Un cache distribué",
+  1238→        ],
+  1239→        answer: 1,
+  1240→        explanation:
+  1241→          "Composants répliqués sans conflit : leurs opérations se commutent, donc toutes les copies convergent sans coordination.",
+  1242→      },
+  1243→      {
+  1244→        question: "Pourquoi la cohérence linéarisable coûte-t-elle de la latence ?",
+  1245→        choices: [
+  1246→          "Elle chiffre les données",
+  1247→          "Chaque opération doit être coordonnée (quorum ou leader) avant l'ack",
+  1248→          "Elle exige plus de bande passante pour les logs",
+  1249→          "Elle interdit le cache",
+  1250→        ],
+  1251→        answer: 1,
+  1252→        explanation:
+  1253→          "Il faut un ordre total reconnu par tous : l'ack attend la majorité ou le leader — un aller-retour de coordination.",
+  1254→      },
+  1255→    ],
+  1256→  },
+  1257→  {
+  1258→    slug: "consensus",
+  1259→    title: "Consensus : se mettre d'accord",
+  1260→    level: "avancé",
+  1261→    durationMin: 35,
+  1262→    summary:
+  1263→      "Raft, quorums, élections de leader : comment des machines se mettent d'accord malgré les pannes — et ce que coûte chaque accord.",
+  1264→    sections: [
+  1265→      {
+  1266→        title: "Le problème",
+  1267→        content:
+  1268→          "Le consensus fait décider des nœuds (éventuellement défaillants) sur une même valeur, dans le même ordre. Sans lui, des réplicas divergent et la vérité se fracture. Le théorème FLP rend le consensus impossible à garantir en asynchrone pur avec une seule panne — les protocoles réels s'en sortent par des timeouts : en théorie ça peut ne jamais finir.",
+  1269→      },
+  1270→      {
+  1271→        title: "Raft : le consensus lisible",
+  1272→        content:
+  1273→          "Raft élit un leader (mandat, majorité de votes), réplique le journal : le client écrit au leader, le leader diffuse, compte les acks de majorité, committe. Avec 2f+1 nœuds, on tolère f pannes : 3 nœuds tolèrent 1 panne, 5 nœuds en tolèrent 2. Toute décision passe par la majorité — deux majorités se chevauchent toujours, d'où la sûreté.",
+  1274→      },
+  1275→      {
+  1276→        title: "Le prix de l'accord",
+  1277→        content:
+  1278→          "Chaque écriture coûte un aller-retour vers la majorité : quelques ms en local, 50 à 100 ms inter-région. Le leader borne le débit d'écriture : on le déplace par plage de clés ou on regroupe les écritures. L'élection après panne prend 1 à 10 s : pendant ce temps, les écritures attendent. Le consensus achète la cohérence en latence et disponibilité.",
+  1279→      },
+  1280→      {
+  1281→        title: "Usages concrets",
+  1282→        content:
+  1283→          "etcd et ZooKeeper stockent configuration et élections de leader (Kubernetes s'appuie sur etcd). Kafka garde ses métadonnées de partitions via un contrôleur Raft. Les clusters de bases (Patroni, CockroachDB) décident du primaire par consensus. S'y ajoutent les leases (bail temporaire) pour verrouiller, et le fencing pour neutraliser les anciens détenteurs.",
+  1284→      },
+  1285→    ],
+  1286→    concepts: ["consensus", "quorum 2f+1", "élection de leader", "Raft", "FLP", "lease"],
+  1287→    quiz: [
+  1288→      {
+  1289→        question: "Avec 5 nœuds Raft, combien de pannes sont tolérées ?",
+  1290→        choices: ["1", "2", "3", "5"],
+  1291→        answer: 1,
+  1292→        explanation: "2f+1 = 5 tolère f = 2 pannes : il faut une majorité (3 nœuds) pour élire et committer.",
+  1293→      },
+  1294→      {
+  1295→        question: "Que garantit le chevauchement des majorités ?",
+  1296→        choices: [
+  1297→          "La vitesse des écritures",
+  1298→          "Deux décisions successives partagent un nœud : impossible de décider deux valeurs contradictoires",
+  1299→          "Le chiffrement des journaux",
+  1300→          "L'ordre alphabétique des nœuds",
+  1301→        ],
+  1302→        answer: 1,
+  1303→        explanation:
+  1304→          "Toute majorité intersecte toute autre : un nœud ne peut pas approuver deux valeurs contradictoires — c'est la sûreté du protocole.",
+  1305→      },
+  1306→      {
+  1307→        question: "Un usage typique d'etcd/ZooKeeper est…",
+  1308→        choices: [
+  1309→          "Stocker les gros volumes de données utilisateur",
+  1310→          "Coordonner configuration, découverte de services et élections de leader",
+  1311→          "Remplacer un CDN",
+  1312→          "Faire du cache applicatif",
+  1313→        ],
+  1314→        answer: 1,
+  1315→        explanation:
+  1316→          "Petits états critiques à forte cohérence : la coordination est leur raison d'être, pas le stockage de masse.",
+  1317→      },
+  1318→    ],
+  1319→  },
+  1320→  {
+  1321→    slug: "cap-theorem",
+  1322→    title: "Le théorème CAP, enfin clair",
+  1323→    level: "avancé",
+  1324→    durationMin: 30,
+  1325→    summary:
+  1326→      "Ce que CAP dit vraiment, ce que PACELC ajoute, et comment décider par cas d'usage plutôt que par dogme.",
+  1327→    sections: [
+  1328→      {
+  1329→        title: "L'énoncé exact",
+  1330→        content:
+  1331→          "CAP (Gilbert et Lynch, 2002) : pendant une partition réseau, un système répliqué ne peut garantir à la fois la cohérence (linéarisable) et la disponibilité totale. Sans partition, les deux sont atteignables — le théorème parle du moment où le réseau se coupe. Un système « CA » est donc un vœu pieux : les partitions arrivent toujours, un jour.",
+  1332→      },
+  1333→      {
+  1334→        title: "CP ou AP : la carte des systèmes",
+  1335→        content:
+  1336→          "CP refuse les opérations sans quorum : etcd, ZooKeeper, une base synchrone — la minorité isolée rejette (indisponible), la majorité décide cohérente. AP sert tout et converge ensuite : Cassandra en niveau relâché, DynamoDB — disponible mais parfois obsolète. La plupart des systèmes règlent le curseur par requête (niveau de cohérence par lecture).",
+  1337→      },
+  1338→      {
+  1339→        title: "PACELC : la version utile",
+  1340→        content:
+  1341→          "Le vrai choix ne se pose pas que pendant les pannes. PACELC : si Partition → choisir A ou C ; sinon (Else) → choisir Latence ou Cohérence. La cohérence forte coûte des acks de quorum même quand tout va bien. C'est ce compromis quotidien qui guide l'ingénierie : chaque milliseconde économisée achète un peu de cohérence en moins.",
+  1342→      },
+  1343→      {
+  1344→        title: "Décider par cas d'usage",
+  1345→        content:
+  1346→          "Le fil rouge : le coût de l'erreur. Encaissement : incohérence = double charge ou perte → cohérence. Compteur de vues, flux social : quelques unités perdues sont invisibles → disponibilité. Panier : read-your-writes suffit. On découpe le même produit en sous-systèmes aux exigences distinctes, et on documente chaque choix — c'est le contrat de l'équipe.",
+  1347→      },
+  1348→    ],
+  1349→    concepts: ["CAP", "partition réseau", "CP/AP", "PACELC", "niveau de cohérence"],
+  1350→    quiz: [
+  1351→      {
+  1352→        question: "Que dit précisément le théorème CAP ?",
+  1353→        choices: [
+  1354→          "Cohérence et disponibilité sont incompatibles en permanence",
+  1355→          "Pendant une partition, on ne peut garantir à la fois cohérence et disponibilité",
+  1356→          "Trois nœuds suffisent toujours",
+  1357→          "La latence est ignorée",
+  1358→        ],
+  1359→        answer: 1,
+  1360→        explanation:
+  1361→          "Le dilemme se pose sous partition ; sans partition, cohérence et disponibilité peuvent coexister.",
+  1362→      },
+  1363→      {
+  1364→        question: "Un système CP isolé en minorité…",
+  1365→        choices: [
+  1366→          "Continue à servir les lectures",
+  1367→          "Rejette les opérations plutôt que de risquer l'incohérence",
+  1368→          "Bascule en lecture seule cohérente",
+  1369→          "Accélère",
+  1370→        ],
+  1371→        answer: 1,
+  1372→        explanation:
+  1373→          "CP privilégie la cohérence : sans quorum, mieux vaut refuser que de servir une valeur divergente.",
+  1374→      },
+  1375→      {
+  1376→        question: "PACELC ajoute à CAP l'idée que…",
+  1377→        choices: [
+  1378→          "Les partitions n'existent plus",
+  1379→          "Même sans partition, la cohérence se paie en latence",
+  1380→          "La disponibilité est gratuite",
+  1381→          "Le SQL est obsolète",
+  1382→        ],
+  1383→        answer: 1,
+  1384→        explanation:
+  1385→          "Else : Latency vs Consistency — l'ack de quorum coûte un aller-retour permanent, pas seulement pendant les pannes.",
+  1386→      },
+  1387→    ],
+  1388→  },
+  1389→  {
+  1390→    slug: "cqrs",
+  1391→    title: "CQRS : séparer lecture et écriture",
+  1392→    level: "avancé",
+  1393→    durationMin: 30,
+  1394→    summary:
+  1395→      "Séparer le modèle d'écriture du modèle de lecture : projections dénormalisées, scalabilité indépendante, cohérence à terme assumée.",
+  1396→    sections: [
+  1397→      {
+  1398→        title: "Deux modèles pour deux besoins",
+  1399→        content:
+  1400→          "Les écritures veulent l'intégrité (transactions, invariants) ; les lectures veulent la vitesse (dénormalisé, indexé, proche de l'affichage). CQRS sépare : un modèle de commande (write side) et un ou plusieurs modèles de requête (read side) alimentés par projections. Le ratio typique 10:1 lectures/écritures justifie d'évoluer chaque côté selon sa charge.",
+  1401→      },
+  1402→      {
+  1403→        title: "Les projections : lecture optimisée",
+  1404→        content:
+  1405→          "Une projection transforme le flux d'événements en vue prête à lire : index de recherche, table dénormalisée pour le fil d'actualité, hash Redis pour les compteurs. La vue est reconstruisable : on la vide, on rejoue le flux. Le décalage entre écriture et projection se mesure en millisecondes à secondes — borné et surveillé.",
+  1406→      },
+  1407→      {
+  1408→        title: "Ce qu'on y gagne",
+  1409→        content:
+  1410→          "Indépendance des échelles : 12 réplicas de lecture pour 2 nœuds d'écriture, sans complexifier le write side. Des lectures simples : pas de jointure au moment de lire, la projection a tout précalculé. Des modèles lisibles : le modèle de commande reste pur (règles métier), l'interface reçoit des formes adaptées. Et le repli : reconstruire une vue en rejouant.",
+  1411→      },
+  1412→      {
+  1413→        title: "Ce qu'on y perd",
+  1414→        content:
+  1415→          "La cohérence à terme entre les deux côtés : écriture acceptée, lecture pas encore à jour — l'UX doit le dire (« en cours »). Deux pipelines à opérer, des projections à maintenir, des coûts doublés. CQRS n'est pas une architecture par défaut : sous quelques centaines de req/s, une base bien indexée fait le même travail pour moins de complexité.",
+  1416→      },
+  1417→    ],
+  1418→    concepts: ["commande/requête", "projection", "dénormalisation", "scalabilité indépendante", "cohérence à terme"],
+  1419→    quiz: [
+  1420→      {
+  1421→        question: "En CQRS, une projection sert à…",
+  1422→        choices: [
+  1423→          "Écrire dans la base primaire",
+  1424→          "Construire une vue de lecture optimisée depuis le flux d'événements",
+  1425→          "Chiffrer les données",
+  1426→          "Répliquer les écritures",
+  1427→        ],
+  1428→        answer: 1,
+  1429→        explanation:
+  1430→          "La projection plie le flux en forme lisible (index, table dénormalisée) — reconstruisable en rejouant l'historique.",
+  1431→      },
+  1432→      {
+  1433→        question: "Le décalage typique entre écriture et lecture CQRS est…",
+  1434→        choices: [
+  1435→          "Nul : synchronisation immédiate",
+  1436→          "Borné : millisecondes à secondes selon le pipeline",
+  1437→          "De plusieurs heures",
+  1438→          "Impossible à mesurer",
+  1439→        ],
+  1440→        answer: 1,
+  1441→        explanation:
+  1442→          "La projection suit le flux avec un retard surveillé ; l'UX gère l'état intermédiaire (« en cours »).",
+  1443→      },
+  1444→      {
+  1445→        question: "Quand CQRS n'est-il PAS recommandé ?",
+  1446→        choices: [
+  1447→          "Charge de lecture très supérieure à l'écriture",
+  1448→          "Modèles de lecture radicalement différents de l'écriture",
+  1449→          "Petite charge : un modèle unique suffit",
+  1450→          "Besoin de reconstruire des vues",
+  1451→        ],
+  1452→        answer: 2,
+  1453→        explanation:
+  1454→          "Sous quelques centaines de req/s, la complexité de deux pipelines dépasse le bénéfice — un modèle CRUD bien indexé suffit.",
+  1455→      },
+  1456→    ],
+  1457→    exercise: {
+  1458→      title: "Scinder lecture et écriture",
+  1459→      goal:
+  1460→        "À partir du modèle « Architecture événementielle », faire grossir le chemin de lecture sans toucher au chemin de commande, jusqu'à 1 200 req/s.",
+  1461→      constraints: [
+  1462→        "Les commandes passent toujours par Kafka + worker de projection",
+  1463→        "L'API de lecture interroge l'index projeté",
+  1464→        "readRatio fixé à 0,9",
+  1465→      ],
+  1466→      templateId: "event-driven",
+  1467→      successCriteria: [
+  1468→        { metric: "servedRps", op: ">=", value: 1000 },
+  1469→        { metric: "p95Ms", op: "<=", value: 600 },
+  1470→      ],
+  1471→    },
+  1472→  },
+  1473→  {
+  1474→    slug: "event-sourcing",
+  1475→    title: "Event sourcing : l'état comme historique",
+  1476→    level: "avancé",
+  1477→    durationMin: 40,
+  1478→    summary:
+  1479→      "Stocker des faits immuables plutôt que des états écrasés : audit gratuit, rejeu, snapshots — et les vraies difficultés de mise en œuvre.",
+  1480→    sections: [
+  1481→      {
+  1482→        title: "L'état n'existe pas : il se calcule",
+  1483→        content:
+  1484→          "Au lieu d'écraser la dernière valeur (UPDATE), l'event sourcing empile des faits immuables : CommandePassée, CommandePayée, CommandeExpédiée. L'état courant = rejeu (fold) des événements d'une entité. La base devient un journal append-only, jamais modifié. L'audit n'est plus une fonctionnalité : c'est la structure même du stockage.",
+  1485→      },
+  1486→      {
+  1487→        title: "Ce que ça débloque",
+  1488→        content:
+  1489→          "Requêtes temporelles : « l'état du panier hier à 14 h » = rejeu jusqu'à cet instant. Nouvelles vues rétroactives : un besoin analytique surgit, on rejoue le flux depuis le premier jour. Debugging : reproduire n'importe quel état passé. Couplage naturel avec CQRS : le journal écrit, les projections lisent. Les événements survivent aux schémas.",
+  1490→      },
+  1491→      {
+  1492→        title: "Les difficultés réelles",
+  1493→        content:
+  1494→          "Faire évoluer les schémas d'événements (upcasting, versionnage) : un événement écrit il y a trois ans doit rester lisible. Le rejeu devient coûteux : snapshots tous les 100 à 1 000 événements. RGPD : effacer un utilisateur dans un journal immuable impose le crypto-shredding (chiffrer par clé utilisateur, détruire la clé).",
+  1495→      },
+  1496→      {
+  1497→        title: "L'infrastructure du journal",
+  1498→        content:
+  1499→          "Kafka (rétention étendue, compaction par clé), EventStoreDB (conçu pour), ou table d'événements en base relationnelle. La consommation : groupes, positions, rejeux. L'écriture : append concurrentiel optimiste (numéro de séquence attendu). Le exactly-once est approché par idempotence — les doublons d'émission sont une donnée d'entrée, pas une exception.",
+  1500→      },
+  1501→    ],
+  1502→    concepts: ["événement immuable", "rejeu", "snapshot", "projection", "upcasting", "crypto-shredding"],
+  1503→    quiz: [
+  1504→      {
+  1505→        question: "En event sourcing, l'état courant d'un agrégat s'obtient par…",
+  1506→        choices: [
+  1507→          "Lecture de la dernière ligne mise à jour",
+  1508→          "Rejeu (fold) de la séquence de ses événements",
+  1509→          "Un calcul statistique",
+  1510→          "Un snapshot obligatoire à chaque écriture",
+  1511→        ],
+  1512→        answer: 1,
+  1513→        explanation:
+  1514→          "Le journal ne stocke que des faits ; l'état est une fonction pure de la séquence — rejouable à tout instant.",
+  1515→      },
+  1516→      {
+  1517→        question: "À quoi sert un snapshot ?",
+  1518→        choices: [
+  1519→          "À sauvegarder la base",
+  1520→          "À raccourcir le rejeu en partant d'un état intermédiaire",
+  1521→          "À supprimer les vieux événements",
+  1522→          "À chiffrer le journal",
+  1523→        ],
+  1524→        answer: 1,
+  1525→        explanation:
+  1526→          "Rejouer 10 000 événements à chaque lecture coûte ; un snapshot tous les 100 à 1 000 événements borne le travail.",
+  1527→      },
+  1528→      {
+  1529→        question: "Comment effacer un utilisateur d'un journal immuable (RGPD) ?",
+  1530→        choices: [
+  1531→          "UPDATE des événements concernés",
+  1532→          "Crypto-shredding : détruire la clé qui chiffre ses données",
+  1533→          "Restaurer une sauvegarde antérieure",
+  1534→          "C'est impossible",
+  1535→        ],
+  1536→        answer: 1,
+  1537→        explanation:
+  1538→          "Les événements restent mais deviennent indéchiffrables : détruire la clé utilisateur efface effectivement les données.",
+  1539→      },
+  1540→    ],
+  1541→  },
+  1542→  {
+  1543→    slug: "saga",
+  1544→    title: "Le pattern saga",
+  1545→    level: "avancé",
+  1546→    durationMin: 35,
+  1547→    summary:
+  1548→      "Des transactions locales enchaînées avec compensations : la saga remplace 2PC pour les flux distribués, en chorégraphie ou en orchestration.",
+  1549→    sections: [
+  1550→      {
+  1551→        title: "Le problème des transactions lointaines",
+  1552→        content:
+  1553→          "Une commande touche panier, paiement, stock, livraison, notification : cinq services, cinq bases. Une transaction 2PC distribuée verrouille tout le monde jusqu'au bout — et si le coordinateur meurt entre les deux phases, les verrous restent. La saga remplace la grande transaction par une séquence de transactions locales, chacune atomique chez soi.",
+  1554→      },
+  1555→      {
+  1556→        title: "Chorégraphie ou orchestration",
+  1557→        content:
+  1558→          "Chorégraphie : chaque service réagit aux événements et publie le suivant — découplage maximal, mais le flux se lit dans quinze consommateurs différents. Orchestration : un chef d'orchestre (machine à états) commande chaque étape — le flux est visible en un endroit, mais le coordinateur devient un hub à fiabiliser. Orchestration au-delà de cinq étapes.",
+  1559→      },
+  1560→      {
+  1561→        title: "Compenser : annuler proprement",
+  1562→        content:
+  1563→          "Chaque étape s'accompagne d'une compensation : paiement → remboursement, réservation → annulation. Une saga échouée rejoue les compensations en ordre inverse. Les compensations peuvent échouer aussi : retries, puis file des cas manuels. Les étapes doivent être idempotentes — les doublons d'événements sont garantis, pas exceptionnels.",
+  1564→      },
+  1565→      {
+  1566→        title: "Isolement et expérience utilisateur",
+  1567→        content:
+  1568→          "Pendant la saga, le monde voit des états intermédiaires : « paiement validé, stock en cours ». Ces états sont des fonctionnalités : verrou sémantique (« en attente de confirmation »), étapes affichées, communication de progression. Sans isolement, deux sagas concurrentes peuvent vendre le même article — d'où les réservations aux points chauds.",
+  1569→      },
+  1570→    ],
+  1571→    concepts: [
+  1572→      "transaction distribuée",
+  1573→      "2PC",
+  1574→      "compensation",
+  1575→      "orchestration et chorégraphie",
+  1576→      "idempotence",
+  1577→      "verrou sémantique",
+  1578→    ],
+  1579→    quiz: [
+  1580→      {
+  1581→        question: "Pourquoi éviter 2PC entre services ?",
+  1582→        choices: [
+  1583→          "Il est trop rapide",
+  1584→          "Il bloque les participants et reste bloqué si le coordinateur meurt",
+  1585→          "Il ne gère pas les COMMIT",
+  1586→          "Il exige du NoSQL",
+  1587→        ],
+  1588→        answer: 1,
+  1589→        explanation:
+  1590→          "Entre prepare et commit, la panne du coordinateur laisse les verrous en place : la saga remplace le blocage par des compensations.",
+  1591→      },
+  1592→      {
+  1593→        question: "Une compensation de saga sert à…",
+  1594→        choices: [
+  1595→          "Accélérer l'étape suivante",
+  1596→          "Annuler l'effet d'une étape déjà validée quand la saga échoue plus loin",
+  1597→          "Répliquer les données",
+  1598→          "Journaliser les erreurs",
+  1599→        ],
+  1600→        answer: 1,
+  1601→        explanation:
+  1602→          "Remboursement, annulation, libération : chaque étape porte son undo — rejoués en sens inverse lors de l'échec.",
+  1603→      },
+  1604→      {
+  1605→        question: "Dans une saga en chorégraphie, le flux métier est…",
+  1606→        choices: [
+  1607→          "Écrit dans un orchestrateur unique",
+  1608→          "Disséminé dans les consommateurs d'événements de chaque service",
+  1609→          "Invisible des logs",
+  1610→          "Toujours cohérent en 100 ms",
+  1611→        ],
+  1612→        answer: 1,
+  1613→        explanation:
+  1614→          "Chaque service réagit et publie : comprendre le flux exige de lire tous les abonnés — d'où l'orchestration pour les flux longs.",
+  1615→      },
+  1616→    ],
+  1617→    exercise: {
+  1618→      title: "Orchestrer une commande distribuée",
+  1619→      goal:
+  1620→        "À partir du modèle « Marketplace », fiabiliser le flux de commande (API → file → worker → e-mail) pour qu'un échec partiel ne perde ni commande ni notification.",
+  1621→      constraints: [
+  1622→        "La persistance et le paiement restent dans le chemin synchrone",
+  1623→        "La file de commandes doit se vider (consumer lag borné)",
+  1624→        "Idempotence des envois d'e-mail : pas de doublons",
+  1625→      ],
+  1626→      templateId: "marketplace",
+  1627→      successCriteria: [
+  1628→        { metric: "errorRate", op: "<=", value: 0.05 },
+  1629→        { metric: "servedRps", op: ">=", value: 2200 },
+  1630→      ],
+  1631→    },
+  1632→  },
+  1633→  {
+  1634→    slug: "multi-region",
+  1635→    title: "Déploiement multi-région",
+  1636→    level: "avancé",
+  1637→    durationMin: 40,
+  1638→    summary:
+  1639→      "Deux régions, du routage global, de la réplication inter-région : latence géographique, résilience et conflits — le sommet de la complexité opérationnelle.",
+  1640→    sections: [
+  1641→      {
+  1642→        title: "Pourquoi quitter sa région",
+  1643→        content:
+  1644→          "Trois moteurs : la latence (un aller-retour transatlantique coûte 80 à 120 ms — la moitié du budget d'une page), la survie (une région entière tombe, cela s'est vu), et la loi (résidence des données : les Européens servent les Européens). Le multi-région commence par deux zones de disponibilité par région, puis deux régions — chaque saut double la complexité.",
+  1645→      },
+  1646→      {
+  1647→        title: "Actif-passif ou actif-actif",
+  1648→        content:
+  1649→          "Actif-passif : une région sert, l'autre attend — bascule pilotée, RTO en minutes, RPO selon la réplication. Actif-actif : les deux servent — bascule instantanée, mais deux zones d'écriture concurrente : conflits à résoudre, cohérence à négocier. Intermédiaire courant : actif-actif en lecture, écriture unique (région mère par utilisateur).",
+  1650→      },
+  1651→      {
+  1652→        title: "Routage global",
+  1653→        content:
+  1654→          "Anycast : une même IP annoncée depuis partout, BGP route au plus proche — parfait pour CDN et DNS. GeoDNS et routage par latence envoient la résolution vers le point le plus rapide. La session collante géographique garde un utilisateur sur sa région. La bascule d'urgence doit être répétée pour être crue : un runbook non testé est un runbook fictif.",
+  1655→      },
+  1656→      {
+  1657→        title: "Les données entre régions",
+  1658→        content:
+  1659→          "Réplication inter-région asynchrone : 50 à 150 ms de propagation, lag borné en régime stable. Chaque utilisateur écrit dans sa région mère et lit localement — les lectures globales agrègent à terme. Les conflits d'écriture multi-maître demandent CRDT, horloges ou résolution métier. Le CDN absorbe le statique partout ; le dynamique se paie en cohérence.",
+  1660→      },
+  1661→    ],
+  1662→    concepts: ["région et zone de disponibilité", "anycast", "actif-actif", "résidence des données", "réplication inter-région"],
+  1663→    quiz: [
+  1664→      {
+  1665→        question: "Un aller-retour transatlantique coûte environ…",
+  1666→        choices: ["8 ms", "80 à 120 ms", "800 ms", "8 s"],
+  1667→        answer: 1,
+  1668→        explanation:
+  1669→          "La lumière dans la fibre prend 40 à 60 ms l'aller : la géographie est incompressible, d'où le multi-région.",
+  1670→      },
+  1671→      {
+  1672→        question: "Le principal risque de l'actif-actif multi-maître est…",
+  1673→        choices: [
+  1674→          "La latence de lecture",
+  1675→          "Les écritures concurrentes sur les mêmes données entre régions",
+  1676→          "Le coût du DNS",
+  1677→          "L'absence de CDN",
+  1678→        ],
+  1679→        answer: 1,
+  1680→        explanation:
+  1681→          "Deux maîtres acceptent des écritures concurrentes : conflits à résoudre (CRDT, résolution métier) — le vrai prix.",
+  1682→      },
+  1683→      {
+  1684→        question: "L'anycast route le trafic…",
+  1685→        choices: [
+  1686→          "Vers la région la moins chère",
+  1687→          "Vers le point de présence le plus proche au sens du routage BGP",
+  1688→          "Aléatoirement",
+  1689→          "Uniquement vers la région primaire",
+  1690→        ],
+  1691→        answer: 1,
+  1692→        explanation:
+  1693→          "Une même IP annoncée partout : le routage BGP envoie au point de présence topologiquement le plus proche.",
+  1694→      },
+  1695→    ],
+  1696→    exercise: {
+  1697→      title: "Servir deux régions",
+  1698→      goal:
+  1699→        "À partir du modèle « Déploiement multi-région », répartir lectures et écritures entre les régions pour tenir 1 000 req/s avec un basculement maîtrisé.",
+  1700→      constraints: [
+  1701→        "Chaque région garde ses serveurs API",
+  1702→        "La réplication primaire → réplique reste en place",
+  1703→        "Injecter une panne sur la région A pour tester la résilience",
+  1704→      ],
+  1705→      templateId: "multi-region",
+  1706→      successCriteria: [
+  1707→        { metric: "servedRps", op: ">=", value: 900 },
+  1708→        { metric: "errorRate", op: "<=", value: 0.05 },
+  1709→      ],
+  1710→    },
+  1711→  },
+  1712→  {
+  1713→    slug: "gestion-des-pannes",
+  1714→    title: "Gestion des pannes",
+  1715→    level: "avancé",
+  1716→    durationMin: 45,
+  1717→    summary:
+  1718→      "Pannes en cascade, détection, dégradation contrôlée, reprise sans tempête : la discipline complète du system design en production.",
+  1719→    sections: [
+  1720→      {
+  1721→        title: "Anatomie d'une cascade",
+  1722→        content:
+  1723→          "Le scénario type : une dépendance ralentit → les requêtes s'empilent côté appelant → le pool s'épuise → le service cesse de répondre → ses propres appelants s'empilent → l'incident devient global. La panne est rarement la cause première : c'est l'absence de garde-fous qui transforme un ralentissement local en outage.",
+  1724→      },
+  1725→      {
+  1726→        title: "Détecter vite, alerter juste",
+  1727→        content:
+  1728→          "Les health checks et sondes synthétiques détectent l'indisponibilité ; les symptômes utilisateur (p95, taux d'erreur, saturation) détectent la dégradation avant l'indisponibilité. Les périodes de grâce évitent le clignotement des alertes. Une bonne détection nomme le service, le rayon d'impact et la métrique fautive — sinon l'équipe cherche pendant l'incident.",
+  1729→      },
+  1730→      {
+  1731→        title: "Dégrader plutôt que tomber",
+  1732→        content:
+  1733→          "Feature flags pour couper les fonctions non essentielles ; lecture seule quand l'écriture est malade ; réponses en cache périmé plutôt que rien ; file d'attente côté client. Le failover automatique (réplique promue, instance relancée) applique la même discipline aux ressources. Un mode dégradé non documenté ni testé n'existe pas.",
+  1734→      },
+  1735→      {
+  1736→        title: "Reprendre sans casser à nouveau",
+  1737→        content:
+  1738→          "Après la panne, le redémarrage massif crée sa propre tempête : cache froid (stampede), connexions simultanées, file qui se vide d'un coup. On réchauffe le cache (préchargement, single-flight), on ouvre les vagues progressivement, on borne les workers. Puis le post-mortem sans blâme : chronologie, cause racine, actions datées. L'error budget dépensé arbitre le rythme suivant.",
+  1739→      },
+  1740→    ],
+  1741→    concepts: [
+  1742→      "cascade de défaillances",
+  1743→      "MTTR",
+  1744→      "dégradation graduelle",
+  1745→      "thundering herd",
+  1746→      "post-mortem sans blâme",
+  1747→      "error budget",
+  1748→    ],
+  1749→    quiz: [
+  1750→      {
+  1751→        question: "Le mécanisme typique d'une panne en cascade est…",
+  1752→        choices: [
+  1753→          "Un disque plein unique",
+  1754→          "Un ralentissement qui épuise les pools de ressources des appelants en cascade",
+  1755→          "Une attaque DDoS",
+  1756→          "Une erreur de configuration DNS",
+  1757→        ],
+  1758→        answer: 1,
+  1759→        explanation:
+  1760→          "Timeouts absents + pools bornés : chaque étage s'asphyxie à son tour — d'où timeouts et circuit breakers partout.",
+  1761→      },
+  1762→      {
+  1763→        question: "Le thundering herd au redémarrage vient de…",
+  1764→        choices: [
+  1765→          "Trop de logs",
+  1766→          "Le cache froid : des milliers de requêtes frappent l'origine simultanément",
+  1767→          "Le DNS qui expire",
+  1768→          "Les sondes de santé",
+  1769→        ],
+  1770→        answer: 1,
+  1771→        explanation:
+  1772→          "Plus de cache = tout le monde descend sur la base : single-flight, préchauffage et vagues progressives l'atténuent.",
+  1773→      },
+  1774→      {
+  1775→        question: "Un bon post-mortem contient…",
+  1776→        choices: [
+  1777→          "Le nom du coupable",
+  1778→          "Chronologie, cause racine et actions datées — sans blâme individuel",
+  1779→          "La liste des clients affectés uniquement",
+  1780→          "La promesse « ne se reproduira plus »",
+  1781→        ],
+  1782→        answer: 1,
+  1783→        explanation:
+  1784→          "Sans blâme et actionnable : ce qui s'est passé, pourquoi, ce qui change — sinon l'incident revient avec intérêts.",
+  1785→      },
+  1786→    ],
+  1787→    exercise: {
+  1788→      title: "Surmonter une panne injectée",
+  1789→      goal:
+  1790→        "À partir du modèle « API scalable », injecter une panne sur un maillon du chemin critique, puis rendre l'architecture assez robuste pour maintenir le service malgré tout.",
+  1791→      constraints: [
+  1792→        "Injecter une panne d'au moins 30 s sur un nœud critique",
+  1793→        "Ajouter les garde-fous nécessaires (redondance, cache, limites)",
+  1794→        "Le service doit rester majoritairement disponible",
+  1795→      ],
+  1796→      templateId: "api-scalable",
+  1797→      successCriteria: [
+  1798→        { metric: "errorRate", op: "<=", value: 0.05 },
+  1799→        { metric: "servedRps", op: ">=", value: 2500 },
+  1800→      ],
+  1801→    },
+  1802→  },
+  1803→];
+  1804→
+  1805→/* ------------------------------------------------------------------
+  1806→ * Helpers de consultation (utilisés par la vue apprentissage)
+  1807→ * ------------------------------------------------------------------ */
+  1808→
+  1809→export const COURSE_MAP: Record<string, Course> = Object.fromEntries(COURSES.map((c) => [c.slug, c]));
+  1810→
+  1811→export function getCourseBySlug(slug: string): Course | undefined {
+  1812→  return COURSE_MAP[slug];
+  1813→}
+  1814→
+  1815→export function getCoursesByLevel(level: CourseLevel): Course[] {
+  1816→  return COURSES.filter((c) => c.level === level);
+  1817→}
+  1818→
+  1819→/** Exercices pratiques disponibles (cours avec exercise défini). */
+  1820→export const COURSES_WITH_EXERCISE: Course[] = COURSES.filter((c) => c.exercise !== undefined);
+  1821→
+  1822→/** Garde-fou de cohérence : chaque exercice référence un template existant. */
+  1823→export const EXERCISE_TEMPLATE_IDS: string[] = COURSES_WITH_EXERCISE.map(
+  1824→  (c) => c.exercise!.templateId,
+  1825→).filter((id) => TEMPLATE_MAP[id] !== undefined);
+  1826→

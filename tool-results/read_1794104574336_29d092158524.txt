@@ -1,0 +1,522 @@
+     1→import type { Course, CourseLevel } from "@/types";
+     2→import { TEMPLATE_MAP } from "@/data/templates";
+     3→
+     4→/**
+     5→ * SystemLab — Parcours d'apprentissage : 23 cours de System Design en français.
+     6→ *
+     7→ * Structure : 7 cours débutant, 8 intermédiaires, 8 avancés.
+     8→ * Chaque cours contient des sections techniques réelles (définitions, ordres de
+     9→ * grandeur vérifiables, trade-offs), des concepts clés, un quiz de 3 questions
+    10→ * et — pour la plupart — un exercice practice branché sur un modèle
+    11→ * d'architecture de `src/data/templates.ts` (voir exercise.templateId).
+    12→ *
+    13→ * Invariant garanti ici : tout exercise.templateId existe dans TEMPLATE_MAP.
+    14→ */
+    15→
+    16→export const COURSES: Course[] = [
+    17→  /* ================================================================
+    18→   * DÉBUTANT (7)
+    19→   * ================================================================ */
+    20→  {
+    21→    slug: "client-serveur",
+    22→    title: "Le modèle client-serveur",
+    23→    level: "débutant",
+    24→    durationMin: 15,
+    25→    summary:
+    26→      "Le modèle fondateur de tout le Web : un client demande, un serveur répond. Concurrence, état, et ce qui rend un serveur scalable dès le premier jour.",
+    27→    sections: [
+    28→      {
+    29→        title: "Demander, traiter, répondre",
+    30→        content:
+    31→          "Un client émet une requête, un serveur la traite et renvoie une réponse. Le client peut être un navigateur, une application mobile ou un autre service ; le serveur écoute sur un port et répond. Presque tout le Web repose sur ce dialogue requête/réponse, du site statique aux plateformes à millions d'utilisateurs.",
+    32→      },
+    33→      {
+    34→        title: "Concurrence : combien de requêtes à la fois",
+    35→        content:
+    36→          "Un serveur ne traite pas les requêtes une par une : il accepte plusieurs connexions simultanées (threads, event loop, workers). Sa capacité vaut environ concurrence × 1000 / temps de réponse en ms : 64 requêtes en cours à 50 ms chacune donnent ~1 280 req/s. Au-delà, les demandes s'accumulent dans une file d'attente.",
+    37→      },
+    38→      {
+    39→        title: "Stateless : la clé pour grandir",
+    40→        content:
+    41→          "Un serveur stateless ne garde aucune mémoire des requêtes précédentes : n'importe quelle instance peut traiter n'importe quelle requête. C'est ce qui permet d'ajouter des machines derrière un répartiteur. L'état (sessions, paniers) est déporté vers Redis ou une base ; un serveur stateful (WebSocket, cache local) contraint le routage.",
+    42→      },
+    43→    ],
+    44→    concepts: ["client-serveur", "requête/réponse", "stateless", "concurrence", "loi de Little"],
+    45→    quiz: [
+    46→      {
+    47→        question: "Que signifie « stateless » pour un serveur ?",
+    48→        choices: [
+    49→          "Il ne conserve aucune donnée entre deux requêtes",
+    50→          "Il ne répond jamais aux clients",
+    51→          "Il stocke toutes les sessions en mémoire locale",
+    52→          "Il refuse les connexions simultanées",
+    53→        ],
+    54→        answer: 0,
+    55→        explanation:
+    56→          "Stateless = aucune mémoire des requêtes précédentes. N'importe quelle instance peut servir n'importe quel client : condition du scaling horizontal.",
+    57→      },
+    58→      {
+    59→        question:
+    60→          "Un serveur traite en moyenne 40 ms par requête et accepte 50 requêtes simultanées. Sa capacité est d'environ…",
+    61→        choices: ["40 req/s", "50 req/s", "1 250 req/s", "2 000 req/s"],
+    62→        answer: 2,
+    63→        explanation:
+    64→          "Capacité ≈ concurrence / latence = 50 / 0,04 = 1 250 req/s. C'est la loi de Little appliquée au débit d'un serveur.",
+    65→      },
+    66→      {
+    67→        question: "Où stocker les sessions utilisateur pour scaler horizontalement ?",
+    68→        choices: [
+    69→          "Dans la mémoire du serveur applicatif",
+    70→          "Dans un stockage partagé type Redis ou base de données",
+    71→          "Dans un cookie non signé côté client uniquement",
+    72→          "Dans les logs applicatifs",
+    73→        ],
+    74→        answer: 1,
+    75→        explanation:
+    76→          "Un stockage partagé (Redis, base) rend toutes les instances interchangeables ; la mémoire locale imposerait des sessions collantes.",
+    77→      },
+    78→    ],
+    79→  },
+    80→  {
+    81→    slug: "http",
+    82→    title: "HTTP et HTTPS de fond en comble",
+    83→    level: "débutant",
+    84→    durationMin: 15,
+    85→    summary:
+    86→      "Méthodes, codes de statut, TLS, HTTP/2 : la grammaire des échanges qui portent vos requêtes, et les réflexes (timeouts, idempotence) qui évitent les catastrophes.",
+    87→    sections: [
+    88→      {
+    89→        title: "Anatomie d'un échange HTTP",
+    90→        content:
+    91→          "Chaque requête porte une méthode (GET, POST, PUT, PATCH, DELETE), un chemin, des en-têtes et parfois un corps ; la réponse renvoie un code de statut. Les codes se lisent par famille : 2xx succès, 3xx redirection, 4xx erreur du client, 5xx erreur du serveur. 200, 404 et 503 sont les plus fréquents en production.",
+    92→      },
+    93→      {
+    94→        title: "HTTPS : chiffrement et identité",
+    95→        content:
+    96→          "HTTPS encapsule HTTP dans TLS : le trafic est chiffré et le serveur prouve son identité via un certificat. Le handshake TLS 1.3 coûte un aller-retour (0-RTT en reprise). Chaque aller-retour réseau coûte 10 à 100 ms selon la distance : limiter les allers-retours compte autant que compresser les contenus.",
+    97→      },
+    98→      {
+    99→        title: "HTTP/1.1, HTTP/2, HTTP/3",
+   100→        content:
+   101→          "HTTP/1.1 sérialise les requêtes d'une même connexion (blocage en tête de file) ; HTTP/2 multiplexe plusieurs flux sur une seule connexion TCP ; HTTP/3 pose HTTP sur QUIC (UDP) pour supprimer le blocage au niveau transport. Les connexions persistantes (keep-alive) évitent de payer TCP + TLS complet à chaque requête.",
+   102→      },
+   103→      {
+   104→        title: "Timeouts et idempotence",
+   105→        content:
+   106→          "GET, PUT et DELETE sont idempotents : les rejouer donne le même état. POST ne l'est pas : un retry peut créer une commande en double — d'où les clés d'idempotence. Côté client, chaque requête doit avoir un timeout ; côté serveur, 408 et 504 signalent un dépassement, 429 une limitation de débit.",
+   107→      },
+   108→    ],
+   109→    concepts: ["HTTP", "codes de statut", "TLS", "HTTP/2", "idempotence"],
+   110→    quiz: [
+   111→      {
+   112→        question: "Un serveur renvoie 503. Que signifie ce code ?",
+   113→        choices: [
+   114→          "La ressource n'existe pas",
+   115→          "Le client n'est pas authentifié",
+   116→          "Le service est indisponible ou surchargé",
+   117→          "La requête est mal formée",
+   118→        ],
+   119→        answer: 2,
+   120→        explanation:
+   121→          "5xx = erreur côté serveur ; 503 Service Unavailable signale le plus souvent une saturation ou une maintenance.",
+   122→      },
+   123→      {
+   124→        question: "Quelle méthode n'est PAS idempotente ?",
+   125→        choices: ["GET", "PUT", "DELETE", "POST"],
+   126→        answer: 3,
+   127→        explanation:
+   128→          "Rejouer un POST peut dupliquer l'effet (double commande). GET, PUT et DELETE laissent l'état inchangé après un second appel.",
+   129→      },
+   130→      {
+   131→        question: "Le principal apport d'HTTP/2 est…",
+   132→        choices: [
+   133→          "Le chiffrement obligatoire",
+   134→          "Le multiplexage des requêtes sur une seule connexion",
+   135→          "La suppression des codes d'erreur",
+   136→          "Un en-tête User-Agent obligatoire",
+   137→        ],
+   138→        answer: 1,
+   139→        explanation:
+   140→          "HTTP/2 multiplexe plusieurs flux en parallèle sur une connexion TCP, supprimant le blocage en tête de file d'HTTP/1.1.",
+   141→      },
+   142→    ],
+   143→  },
+   144→  {
+   145→    slug: "api-rest",
+   146→    title: "Concevoir une API REST solide",
+   147→    level: "débutant",
+   148→    durationMin: 20,
+   149→    summary:
+   150→      "Concevoir une API que d'autres peuvent consommer sans souffrir : ressources, pagination, erreurs structurées, versioning — et le piège classique du N+1.",
+   151→    sections: [
+   152→      {
+   153→        title: "Des ressources et des verbes",
+   154→        content:
+   155→          "REST modélise l'API autour de ressources identifiées par des URI (/users/42/orders) manipulées avec les verbes HTTP. GET lit sans modifier, POST crée, PUT remplace, DELETE supprime. Une API REST bien conçue est prévisible : la structure de l'URI raconte la hiérarchie, les codes de statut racontent le résultat.",
+   156→      },
+   157→      {
+   158→        title: "Pagination, filtrage, tri",
+   159→        content:
+   160→          "Jamais de réponse non bornée : paginer, filtrer et trier côté serveur. L'offset re-scanne les premières lignes et devient lent au-delà de quelques milliers d'éléments ; la pagination par curseur (WHERE id > dernier_id) reste constante en temps. Une liste non paginée est un incident de production en sursis.",
+   161→      },
+   162→      {
+   163→        title: "Le problème N+1",
+   164→        content:
+   165→          "Récupérer une liste puis une ressource liée par élément multiplie les allers-retours : 1 liste + N détails = N+1 requêtes, chacune avec sa latence. On l'évite côté API avec des inclusions (?include=orders) ou côté consommateur avec un BFF. Le remède serveur : jointures, vues ou batch loading.",
+   166→      },
+   167→      {
+   168→        title: "Erreurs structurées et versioning",
+   169→        content:
+   170→          "Les erreurs doivent être stables et lisibles par machine : code, message humain, champs concernés. Versionner dès le premier consommateur externe (/v1/ ou en-tête) car retirer un champ casse des clients que vous ne contrôlez pas. 429 accompagne les quotas ; les clés d'idempotence sécurisent les POST rejoués.",
+   171→      },
+   172→    ],
+   173→    concepts: ["REST", "ressource", "pagination par curseur", "problème N+1", "versioning", "clé d'idempotence"],
+   174→    quiz: [
+   175→      {
+   176→        question: "GET /users/42 renvoie 200. Après DELETE /users/42, GET /users/42 renvoie…",
+   177→        choices: ["200 puis 500", "204 puis 404", "404 puis 404", "301 puis 200"],
+   178→        answer: 1,
+   179→        explanation:
+   180→          "La suppression réussit sans corps de réponse (204) ; ensuite la ressource n'existe plus : 404 Not Found.",
+   181→      },
+   182→      {
+   183→        question: "Une liste renvoie 10 000 objets en une seule réponse. Quel risque immédiat ?",
+   184→        choices: [
+   185→          "Aucun, c'est le travail de l'API",
+   186→          "Latence, mémoire et timeouts côté client comme serveur",
+   187→          "Un code 404 systématique",
+   188→          "La perte des en-têtes HTTP",
+   189→        ],
+   190→        answer: 1,
+   191→        explanation:
+   192→          "Sans pagination, charge réseau et mémoire, sérialisation et temps de réponse explosent des deux côtés : il faut paginer.",
+   193→      },
+   194→      {
+   195→        question: "Le problème N+1 se produit quand…",
+   196→        choices: [
+   197→          "Un seul appel renvoie N objets",
+   198→          "On boucle sur une liste en émettant une requête par élément",
+   199→          "La base contient N index",
+   200→          "N clients partagent une connexion",
+   201→        ],
+   202→        answer: 1,
+   203→        explanation:
+   204→          "Chaque élément déclenche sa propre requête : N+1 allers-retours cumulent la latence et chargent la base.",
+   205→      },
+   206→    ],
+   207→  },
+   208→  {
+   209→    slug: "bases-de-donnees",
+   210→    title: "Bases de données : ce qui décide de la vitesse",
+   211→    level: "débutant",
+   212→    durationMin: 25,
+   213→    summary:
+   214→      "Index, transactions, connexions : les mécanismes qui décident réellement de la vitesse d'une base, avec les ordres de grandeur à connaître avant de crier « la base est lente ».",
+   215→    sections: [
+   216→      {
+   217→        title: "SQL ou NoSQL : choisir selon les requêtes",
+   218→        content:
+   219→          "Une base relationnelle (PostgreSQL, MySQL) garantit des transactions ACID et des requêtes riches avec jointures : idéale pour les données transactionnelles. Le NoSQL spécialise : clé-valeur (Redis) pour la vitesse, document (MongoDB) pour les objets flexibles, wide-column (Cassandra) pour le volume d'écriture. On choisit selon les requêtes dominantes.",
+   220→      },
+   221→      {
+   222→        title: "Index : la différence entre 8 ms et 8 s",
+   223→        content:
+   224→          "Sans index, un SELECT parcourt toute la table (scan séquentiel). Un index B-tree répond en O(log n) : quelques lectures de pages suffisent, typiquement 1 à 10 ms par lecture indexée. Chaque index accélère les lectures mais ralentit chaque écriture et occupe de l'espace : on indexe les colonnes filtrées et triées, pas tout.",
+   225→      },
+   226→      {
+   227→        title: "Écritures et transactions",
+   228→        content:
+   229→          "Une écriture durable traverse le journal (WAL) avec fsync : 5 à 35 ms selon le stockage. Les transactions regroupent des opérations et les rendent atomiques ; le niveau d'isolation (read committed, serializable) définit ce que les transactions concurrentes peuvent voir. Verrous et dimensionnement des connexions font le reste.",
+   230→      },
+   231→      {
+   232→        title: "Connexions : le goulot silencieux",
+   233→        content:
+   234→          "Chaque instance n'accepte qu'un nombre limité de connexions (souvent 100 à 500) ; au-delà, les clients attendent. Un pool (PgBouncer, pool applicatif) multiplexe des milliers de requêtes clientes sur quelques dizaines de connexions réelles. Capacité d'une base ≈ connexions × 1000 / temps moyen en ms.",
+   235→      },
+   236→    ],
+   237→    concepts: ["ACID", "index B-tree", "WAL", "pool de connexions", "isolation"],
+   238→    quiz: [
+   239→      {
+   240→        question: "Qu'est-ce qu'une transaction ACID ?",
+   241→        choices: [
+   242→          "Une requête particulièrement rapide",
+   243→          "Un groupe d'opérations atomiques, cohérentes, isolées et durables",
+   244→          "Un index composite multi-colonnes",
+   245→          "Une sauvegarde planifiée",
+   246→        ],
+   247→        answer: 1,
+   248→        explanation:
+   249→          "Atomicity, Consistency, Isolation, Durability : tout ou rien, état valide, isolation entre transactions, persistance au commit.",
+   250→      },
+   251→      {
+   252→        question: "Pourquoi un index B-tree accélère-t-il les lectures ?",
+   253→        choices: [
+   254→          "Il compresse la table",
+   255→          "Il stocke les clés triées : la recherche descend en O(log n) au lieu de tout parcourir",
+   256→          "Il duplique la base en mémoire",
+   257→          "Il supprime les jointures",
+   258→        ],
+   259→        answer: 1,
+   260→        explanation:
+   261→          "La structure arborescente triée ne visite que quelques pages par requête, là où le scan séquentiel lit toute la table.",
+   262→      },
+   263→      {
+   264→        question: "À quoi sert un pool de connexions (PgBouncer) ?",
+   265→        choices: [
+   266→          "À sauvegarder la base",
+   267→          "À multiplexer des milliers de clients sur peu de connexions réelles",
+   268→          "À créer des index automatiquement",
+   269→          "À répliquer les écritures",
+   270→        ],
+   271→        answer: 1,
+   272→        explanation:
+   273→          "Le pool ouvre peu de connexions coûteuses vers la base et les partage entre clients, évitant l'attente au-delà de max_connections.",
+   274→      },
+   275→    ],
+   276→  },
+   277→  {
+   278→    slug: "cache-fondamental",
+   279→    title: "Le cache, fondamentalement",
+   280→    level: "débutant",
+   281→    durationMin: 20,
+   282→    summary:
+   283→      "Dix fois moins de latence sur les lectures chaudes : hits, misses, invalidation et éviction. Le cache est simple — jusqu'au jour où il ment.",
+   284→    sections: [
+   285→      {
+   286→        title: "Trois ordres de grandeur",
+   287→        content:
+   288→          "Lire en mémoire vive coûte environ 0,1 à 1 ms ; lire une ligne indexée sur disque via une base, 5 à 15 ms. Un cache en mémoire (Redis, Memcached) sert les lectures répétées 10 à 100 fois plus vite et protège la base : avec 75 % de hits, la base ne voit que le quart du trafic de lecture.",
+   289→      },
+   290→      {
+   291→        title: "Cache-aside : le pattern par défaut",
+   292→        content:
+   293→          "L'application lit d'abord le cache ; sur miss, elle interroge la base puis remplit le cache avec un TTL. Le TTL borne l'obsolescence et sert de filet de sécurité. Les écritures se négocient : write-through (cache et base synchrones, écritures lentes) ou write-around (base seule, le cache se réchauffe aux lectures).",
+   294→      },
+   295→      {
+   296→        title: "Invalidation : le problème difficile",
+   297→        content:
+   298→          "Un cache accélère en servant des données qui peuvent devenir fausses. Invalider trop tard : données obsolètes ; trop tôt : bénéfice perdu. Les invalidations ciblées (par clé, par tag) sont précises mais complexes ; le TTL est simple mais approximatif. Un cache qui tombe révèle 100 % de misses d'un coup : c'est la cache stampede.",
+   299→      },
+   300→      {
+   301→        title: "Éviction et working set",
+   302→        content:
+   303→          "Quand la mémoire est pleine, il faut chasser : LRU évince la clé la moins récemment utilisée, LFU la moins fréquente. allkeys-lru convient à un cache généraliste ; volatile-lru n'évince que les clés avec TTL ; no-eviction rejette les écritures. Même logique côté CDN : 85 % de hit veut dire 15 % du trafic statique atteint l'origine.",
+   304→      },
+   305→    ],
+   306→    concepts: ["cache-aside", "TTL", "éviction LRU", "taux de hit", "cache stampede"],
+   307→    quiz: [
+   308→      {
+   309→        question: "Le pattern cache-aside consiste à…",
+   310→        choices: [
+   311→          "Écrire systématiquement dans le cache et la base en même temps",
+   312→          "Lire le cache puis, sur miss, lire la base et remplir le cache",
+   313→          "Ne jamais écrire dans le cache",
+   314→          "Synchroniser les caches de toutes les instances",
+   315→        ],
+   316→        answer: 1,
+   317→        explanation:
+   318→          "Cache-aside : l'application gère la lecture et le remplissage, le TTL encadre l'obsolescence des données.",
+   319→      },
+   320→      {
+   321→        question: "Un Redis de 8 Go reçoit un working set de 20 Go. Que se passe-t-il ?",
+   322→        choices: [
+   323→          "Redis refuse toutes les écritures",
+   324→          "Les clés les moins utilisées sont évincées (LRU) : le taux de hit baisse",
+   325→          "Redis écrit le surplus sur disque automatiquement",
+   326→          "Rien : Redis compresse les données",
+   327→        ],
+   328→        answer: 1,
+   329→        explanation:
+   330→          "Avec allkeys-lru, l'excédent est évincé et des clés utiles disparaissent : il faut plus de mémoire ou un working set plus petit.",
+   331→      },
+   332→      {
+   333→        question: "Qu'est-ce qu'une cache stampede ?",
+   334→        choices: [
+   335→          "Une invalidation massive par erreur humaine",
+   336→          "Un pic soudain de misses qui frappe la base de plein fouet",
+   337→          "Un pic de hit rate",
+   338→          "Une corruption du cache",
+   339→        ],
+   340→        answer: 1,
+   341→        explanation:
+   342→          "Expiration simultanée ou panne du cache : des milliers de requêtes descendent d'un coup vers la base. On l'atténue par du jitter sur les TTL ou un verrou de rechargement.",
+   343→      },
+   344→    ],
+   345→    exercise: {
+   346→      title: "Réduire la latence avec un cache Redis",
+   347→      goal:
+   348→        "À partir du modèle « API scalable », régler le cache Redis (taux de hit, mémoire) pour absorber les lectures et faire chuter la latence p95 sous la barre des 600 ms.",
+   349→      constraints: [
+   350→        "Ne pas supprimer le composant Redis",
+   351→        "PostgreSQL conservé en bout de chaîne",
+   352→        "Scénario par défaut : 3 500 req/s, 80 % de lectures",
+   353→      ],
+   354→      templateId: "api-scalable",
+   355→      successCriteria: [
+   356→        { metric: "cacheHitRate", op: ">=", value: 0.7 },
+   357→        { metric: "p95Ms", op: "<=", value: 600 },
+   358→      ],
+   359→    },
+   360→  },
+   361→  {
+   362→    slug: "load-balancing",
+   363→    title: "Load balancing : répartir pour régner",
+   364→    level: "débutant",
+   365→    durationMin: 20,
+   366→    summary:
+   367→      "Répartir le trafic entre plusieurs serveurs : L4 contre L7, algorithmes de répartition et health checks — la première brique de toute architecture scalable.",
+   368→    sections: [
+   369→      {
+   370→        title: "Pourquoi un répartiteur",
+   371→        content:
+   372→          "Un load balancer place le trafic entrant sur plusieurs serveurs : capacité additionnée (N serveurs ≈ N fois le débit), redondance (une machine morte est évacuée) et déploiements sans coupure. Sans lui, le seul scaling possible est vertical : une machine plus grosse, vite plafonnée et jamais redondante. C'est la première brique qui fait grandir.",
+   373→      },
+   374→      {
+   375→        title: "L4 ou L7 : où lire la requête",
+   376→        content:
+   377→          "Un L7 (application) inspecte HTTP : il route par chemin, par en-tête, termine TLS et coûte 1 à 5 ms. Un L4 (transport) distribue les paquets TCP sans les lire : plus rapide, moins malin. Le L4 ne peut pas router /api vers un pool et /images vers un autre ; le L7 le fait mais consomme davantage. En pratique : L7 devant les services.",
+   378→      },
+   379→      {
+   380→        title: "Algorithmes de répartition",
+   381→        content:
+   382→          "Round Robin tourne circulairement — simple, mais ignore la charge réelle. Least Connections envoie vers le serveur le moins occupé : robuste quand les requêtes ont des durées variées. IP Hash dirige un même client vers le même serveur (sessions collantes) : pratique pour l'état local, risqué si la population cliente est déséquilibrée.",
+   383→      },
+   384→      {
+   385→        title: "Health checks : la santé avant tout",
+   386→        content:
+   387→          "Le répartiteur sonde ses cibles (HTTP /health, TCP) et retire celles qui échouent : le trafic bascule en quelques secondes. Sans health check, la moitié des requêtes part vers un serveur mort. Le répartiteur lui-même doit être redondé (paire active/passive) — sinon il devient le point de défaillance unique qu'il devait supprimer.",
+   388→      },
+   389→    ],
+   390→    concepts: ["L4 vs L7", "round-robin", "least-connections", "health check", "point de défaillance unique"],
+   391→    quiz: [
+   392→      {
+   393→        question: "Quelle différence entre un load balancer L4 et L7 ?",
+   394→        choices: [
+   395→          "Le L4 est plus lent",
+   396→          "Le L4 route au niveau TCP sans lire HTTP ; le L7 inspecte les requêtes applicatives",
+   397→          "Le L7 ne gère pas TLS",
+   398→          "Aucune, c'est du marketing",
+   399→        ],
+   400→        answer: 1,
+   401→        explanation:
+   402→          "L4 = transport (flux bruts, très rapide) ; L7 = application (routes, en-têtes, terminaison TLS, un peu plus de latence).",
+   403→      },
+   404→      {
+   405→        question: "Quel algorithme convient quand les requêtes ont des durées très variées ?",
+   406→        choices: ["Round Robin", "Least Connections", "IP Hash", "Random pur"],
+   407→        answer: 1,
+   408→        explanation:
+   409→          "Least Connections tient compte des requêtes en cours : les serveurs occupés par des traitements longs reçoivent moins de nouveau travail.",
+   410→      },
+   411→      {
+   412→        question: "Un load balancer unique devant 20 serveurs est…",
+   413→        choices: [
+   414→          "Optimal : simple et rapide",
+   415→          "Un point de défaillance unique",
+   416→          "Redondant par construction",
+   417→          "Impossible en HTTP",
+   418→        ],
+   419→        answer: 1,
+   420→        explanation:
+   421→          "S'il tombe, tout tombe. On le double (paire actif/passif) : le risque existe toujours mais il est maîtrisé, pas concentré.",
+   422→      },
+   423→    ],
+   424→    exercise: {
+   425→      title: "Équilibrer un pool applicatif",
+   426→      goal:
+   427→        "À partir du modèle « Application trois tiers », régler le Load Balancer L7 et le pool d'API pour absorber 1 500 req/s en gardant une p95 maîtrisée.",
+   428→      constraints: [
+   429→        "Conserver le Load Balancer L7",
+   430→        "Pas plus de 50 instances applicatives au total",
+   431→        "PostgreSQL unique en bout de chaîne",
+   432→      ],
+   433→      templateId: "three-tier",
+   434→      successCriteria: [
+   435→        { metric: "servedRps", op: ">=", value: 1400 },
+   436→        { metric: "p95Ms", op: "<=", value: 500 },
+   437→      ],
+   438→    },
+   439→  },
+   440→  {
+   441→    slug: "latence-et-debit",
+   442→    title: "Latence et débit : mesurer honnêtement",
+   443→    level: "débutant",
+   444→    durationMin: 15,
+   445→    summary:
+   446→      "p95, saturation, files d'attente : les métriques qui décrivent honnêtement un système, et la loi de Little qui relie tout.",
+   447→    sections: [
+   448→      {
+   449→        title: "Deux métriques, deux questions",
+   450→        content:
+   451→          "La latence mesure le temps d'une requête (ms) ; le débit compte les requêtes par seconde. On les confond parce qu'elles se dégradent ensemble : quand un serveur sature, sa file grandit et chaque requête attend plus. Un système peut être rapide et peu endurant, ou endurant et lent — il faut piloter les deux indicateurs.",
+   452→      },
+   453→      {
+   454→        title: "Percentiles : la vérité est dans la queue",
+   455→        content:
+   456→          "La moyenne masque les malheureux : p95 signifie que 95 % des requêtes sont plus rapides. Sur 10 000 requêtes, le p99 concerne 100 utilisateurs réels. Les SLO sérieux s'écrivent en percentiles (p95 < 300 ms). Attention : les percentiles ne se moyennent pas — agrégés naïvement, ils mentent.",
+   457→      },
+   458→      {
+   459→        title: "Saturation et files d'attente",
+   460→        content:
+   461→          "L'utilisation ρ = débit entrant / capacité. Tant que ρ < 0,7, l'attente reste faible ; à 0,9 elle explose : chaque requête arrive derrière d'autres. La loi de Little relie le tout : longueur de file = débit × attente. On dimensionne à 70-80 % d'utilisation, jamais à 100 %.",
+   462→      },
+   463→      {
+   464→        title: "La latence de bout en bout",
+   465→        content:
+   466→          "Une requête traverse le réseau, le répartiteur, le serveur, la base : la latence totale est la somme des étages, plus l'attente qui s'y accumule. On optimise d'abord le terme dominant — un appel base à 120 ms écrase tout le reste. Mesurer avant d'optimiser, et mesurer côté client : c'est là que vit l'utilisateur.",
+   467→      },
+   468→    ],
+   469→    concepts: ["latence", "débit", "percentiles p95/p99", "loi de Little", "saturation"],
+   470→    quiz: [
+   471→      {
+   472→        question: "p95 = 250 ms signifie…",
+   473→        choices: [
+   474→          "La requête moyenne prend 250 ms",
+   475→          "95 % des requêtes sont servies en 250 ms ou moins",
+   476→          "5 % des requêtes échouent",
+   477→          "Le serveur traite 250 req/s",
+   478→        ],
+   479→        answer: 1,
+   480→        explanation:
+   481→          "Le percentile 95 borne la queue de distribution : au-delà se trouvent les 5 % de requêtes les plus lentes.",
+   482→      },
+   483→      {
+   484→        question: "Un serveur affiche une utilisation de 0,95. Que se passe-t-il ?",
+   485→        choices: [
+   486→          "Rien, il reste de la marge",
+   487→          "L'attente en file explose : la latence dérive",
+   488→          "Le débit double",
+   489→          "Les erreurs disparaissent",
+   490→        ],
+   491→        answer: 1,
+   492→        explanation:
+   493→          "Près de la saturation, chaque requête attend derrière les précédentes : la file croît et la latence s'envole.",
+   494→      },
+   495→      {
+   496→        question: "Selon la loi de Little, avec 2 000 req/s et 100 ms d'attente moyenne…",
+   497→        choices: [
+   498→          "La file moyenne vaut 200 requêtes",
+   499→          "La file moyenne vaut 20 requêtes",
+   500→          "Le débit vaut 20 req/s",
+   501→          "La latence vaut 2 s",
+   502→        ],
+   503→        answer: 0,
+   504→        explanation: "Longueur = débit × temps = 2 000 × 0,1 s = 200 requêtes en attente en moyenne.",
+   505→      },
+   506→    ],
+   507→    exercise: {
+   508→      title: "Cibler une p95 acceptable",
+   509→      goal:
+   510→        "À partir du modèle « API simple », jouer sur le temps de traitement et le nombre d'instances pour tenir une p95 basse sous 500 req/s.",
+   511→      constraints: [
+   512→        "Garder la chaîne utilisateur → API → PostgreSQL",
+   513→        "Ne pas modifier le scénario de trafic",
+   514→        "Coût mensuel raisonné : pas de 50 instances",
+   515→      ],
+   516→      templateId: "api-simple",
+   517→      successCriteria: [{ metric: "p95Ms", op: "<=", value: 600 }],
+   518→    },
+   519→  },
+   520→
+
+[showing lines 1-520 of 1826; use offset=521 with limit to continue reading]

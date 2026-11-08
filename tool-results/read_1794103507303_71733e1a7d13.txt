@@ -1,0 +1,775 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * SystemLab — Barre de simulation (bas de l'éditeur, repliable).
+     5→ * Configuration du scénario (grille de champs), section « Panne simulée »,
+     6→ * section « Avancé », bouton de lancement et état de la simulation.
+     7→ */
+     8→import { memo, useEffect, useState, type ComponentType, type ReactNode } from "react";
+     9→import {
+    10→  CheckCircle2,
+    11→  ChevronDown,
+    12→  Clock,
+    13→  Gauge,
+    14→  Info,
+    15→  Loader2,
+    16→  Play,
+    17→  RefreshCw,
+    18→  Square,
+    19→  TriangleAlert,
+    20→  Users,
+    21→  Zap,
+    22→} from "lucide-react";
+    23→import { cn } from "@/lib/utils";
+    24→import { formatMs, formatPercent, formatRps } from "@/lib/format";
+    25→import { MODE_OPTIONS as SCENARIO_MODE_OPTIONS } from "@/lib/labels";
+    26→import { useEditorStore } from "@/stores/editor-store";
+    27→import { useSimulationStore } from "@/stores/simulation-store";
+    28→import { useAppStore } from "@/stores/app-store";
+    29→import type {
+    30→  FailureScenario,
+    31→  ScenarioConfig,
+    32→  SimulationMode,
+    33→  TrafficProfile,
+    34→} from "@/types";
+    35→import { Button } from "@/components/ui/button";
+    36→import {
+    37→  Collapsible,
+    38→  CollapsibleContent,
+    39→  CollapsibleTrigger,
+    40→} from "@/components/ui/collapsible";
+    41→import { Input } from "@/components/ui/input";
+    42→import { Label } from "@/components/ui/label";
+    43→import { Progress } from "@/components/ui/progress";
+    44→import {
+    45→  Select,
+    46→  SelectContent,
+    47→  SelectItem,
+    48→  SelectTrigger,
+    49→  SelectValue,
+    50→} from "@/components/ui/select";
+    51→import { Slider } from "@/components/ui/slider";
+    52→import { launchSimulation } from "../run-simulation";
+    53→
+    54→/* ------------------------------------------------------------------ */
+    55→/* Options                                                             */
+    56→/* ------------------------------------------------------------------ */
+    57→
+    58→const PROFILE_OPTIONS: { value: TrafficProfile; label: string }[] = [
+    59→  { value: "constant", label: "Constant" },
+    60→  { value: "ramp", label: "Progressif" },
+    61→  { value: "spike", label: "Pic soudain" },
+    62→  { value: "waves", label: "En vagues" },
+    63→  { value: "random", label: "Aléatoire" },
+    64→];
+    65→
+    66→const MODE_OPTIONS = SCENARIO_MODE_OPTIONS;
+    67→
+    68→function defaultFailure(nodeId: string): FailureScenario {
+    69→  return {
+    70→    nodeId,
+    71→    startSec: 30,
+    72→    durationSec: 20,
+    73→    kind: "outage",
+    74→    severity: 0.5,
+    75→    recoverySec: 15,
+    76→  };
+    77→}
+    78→
+    79→/* ------------------------------------------------------------------ */
+    80→/* Champs                                                              */
+    81→/* ------------------------------------------------------------------ */
+    82→
+    83→interface ScenarioFieldProps {
+    84→  id: string;
+    85→  label: string;
+    86→  icon: ComponentType<{ className?: string }>;
+    87→  children: ReactNode;
+    88→  help?: string;
+    89→}
+    90→
+    91→function ScenarioField({ id, label, icon: Icon, children, help }: ScenarioFieldProps) {
+    92→  return (
+    93→    <div className="space-y-1.5">
+    94→      <Label htmlFor={id} className="flex items-center gap-1.5 text-xs font-medium">
+    95→        <Icon className="size-3.5 text-muted-foreground" />
+    96→        {label}
+    97→      </Label>
+    98→      {children}
+    99→      {help && <p className="text-[11px] leading-snug text-muted-foreground">{help}</p>}
+   100→    </div>
+   101→  );
+   102→}
+   103→
+   104→function ScenarioNumberInput({
+   105→  id,
+   106→  value,
+   107→  min,
+   108→  max,
+   109→  step,
+   110→  onCommit,
+   111→  ariaLabel,
+   112→}: {
+   113→  id: string;
+   114→  value: number;
+   115→  min?: number;
+   116→  max?: number;
+   117→  step?: number;
+   118→  onCommit: (value: number) => void;
+   119→  ariaLabel: string;
+   120→}) {
+   121→  const [draft, setDraft] = useState(String(value));
+   122→  useEffect(() => {
+   123→    setDraft(String(value));
+   124→  }, [value]);
+   125→  const commit = (raw: string) => {
+   126→    const parsed = Number(raw.replace(",", "."));
+   127→    if (!Number.isFinite(parsed)) {
+   128→      setDraft(String(value));
+   129→      return;
+   130→    }
+   131→    let next = parsed;
+   132→    if (min !== undefined) next = Math.max(min, next);
+   133→    if (max !== undefined) next = Math.min(max, next);
+   134→    onCommit(next);
+   135→  };
+   136→  return (
+   137→    <Input
+   138→      id={id}
+   139→      type="number"
+   140→      inputMode="decimal"
+   141→      value={draft}
+   142→      min={min}
+   143→      max={max}
+   144→      step={step}
+   145→      aria-label={ariaLabel}
+   146→      onChange={(event) => setDraft(event.target.value)}
+   147→      onBlur={() => commit(draft)}
+   148→      onKeyDown={(event) => {
+   149→        if (event.key === "Enter") commit(draft);
+   150→      }}
+   151→      className="h-8 tabular-nums"
+   152→    />
+   153→  );
+   154→}
+   155→
+   156→/* ------------------------------------------------------------------ */
+   157→/* Barre de simulation                                                 */
+   158→/* ------------------------------------------------------------------ */
+   159→
+   160→/**
+   161→ * Menu « Nœud cible » de la panne simulée : seul consommateur de la liste
+   162→ * complète des nœuds. Abonnement LOCAL à s.nodes — le composant n'est monté
+   163→ * que quand la section « Panne simulée » est dépliée avec une panne
+   164→ * configurée, la barre elle-même ne suit plus le tableau des nœuds.
+   165→ */
+   166→function FailureNodeSelect({
+   167→  value,
+   168→  onValueChange,
+   169→}: {
+   170→  value: string;
+   171→  onValueChange: (value: string) => void;
+   172→}) {
+   173→  const nodes = useEditorStore((s) => s.nodes);
+   174→  return (
+   175→    <Select value={value} onValueChange={onValueChange}>
+   176→      <SelectTrigger id="failure-node" className="h-8 w-full" aria-label="Nœud cible de la panne">
+   177→        <SelectValue />
+   178→      </SelectTrigger>
+   179→      <SelectContent>
+   180→        {nodes.map((node) => (
+   181→          <SelectItem key={node.id} value={node.id}>
+   182→            {node.label}
+   183→          </SelectItem>
+   184→        ))}
+   185→      </SelectContent>
+   186→    </Select>
+   187→  );
+   188→}
+   189→
+   190→// memo : coupe la cascade de re-render issue du parent (EditorView, réinscrit
+   191→// à `revision`) — la barre ne re-render plus du tout pendant un drag ; ses
+   192→// propres abonnements par valeur décident seuls des mises à jour.
+   193→export const SimulationBar = memo(function SimulationBar({ className }: { className?: string }) {
+   194→  const scenario = useEditorStore((s) => s.scenario);
+   195→  // Abonnements par VALEUR (nombre/chaîne) : la barre ne re-render pas à
+   196→  // chaque frame de drag de nœud (les positions ne changent ni le compte ni
+   197→  // le libellé du premier nœud). Les actions lisent l'état frais via
+   198→  // getState() au moment du clic.
+   199→  const nodeCount = useEditorStore((s) => s.nodes.length);
+   200→  const firstNodeLabel = useEditorStore((s) => s.nodes[0]?.label ?? null);
+   201→  const setScenario = useEditorStore((s) => s.setScenario);
+   202→  const open = useEditorStore((s) => s.simulationBarOpen);
+   203→  const setSimulationBarOpen = useEditorStore((s) => s.setSimulationBarOpen);
+   204→
+   205→  const status = useSimulationStore((s) => s.status);
+   206→  const progress = useSimulationStore((s) => s.progress);
+   207→  const error = useSimulationStore((s) => s.error);
+   208→  const result = useSimulationStore((s) => s.result);
+   209→  const abort = useSimulationStore((s) => s.abort);
+   210→
+   211→  const [manualFailureOpen, setManualFailureOpen] = useState(false);
+   212→  const [advancedOpen, setAdvancedOpen] = useState(false);
+   213→
+   214→  // Section « Panne simulée » : dépliée d'office en mode « Test de panne »
+   215→  // (dérivé, sans effet) ou manuellement via « Configurer une panne ».
+   216→  const failureForced = scenario.mode === "failure";
+   217→  const failureOpen = failureForced || manualFailureOpen;
+   218→
+   219→  const patchFailure = (patch: Partial<FailureScenario>) => {
+   220→    if (!scenario.failure) return;
+   221→    setScenario({ failure: { ...scenario.failure, ...patch } });
+   222→  };
+   223→
+   224→  const running = status === "running";
+   225→  const modeLabel =
+   226→    MODE_OPTIONS.find((m) => m.value === scenario.mode)?.label ?? scenario.mode;
+   227→
+   228→  return (
+   229→    <Collapsible open={open} onOpenChange={setSimulationBarOpen} className={className}>
+   230→      <div className="border-t border-border bg-card">
+   231→        <CollapsibleTrigger asChild>
+   232→          <button
+   233→            type="button"
+   234→            className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+   235→            aria-expanded={open}
+   236→          >
+   237→            <ChevronDown
+   238→              className={cn(
+   239→                "size-4 text-muted-foreground transition-transform",
+   240→                !open && "-rotate-90",
+   241→              )}
+   242→            />
+   243→            Configuration de la simulation
+   244→            <span className="ml-2 hidden items-center gap-2 text-xs font-normal text-muted-foreground sm:flex">
+   245→              <span>{modeLabel}</span>
+   246→              <span aria-hidden>·</span>
+   247→              <span>{formatRps(scenario.requestsPerSecond)}</span>
+   248→              <span aria-hidden>·</span>
+   249→              <span>{scenario.durationSec} s</span>
+   250→              <span aria-hidden>·</span>
+   251→              <span>{formatPercent(scenario.readRatio, 0)} lectures</span>
+   252→            </span>
+   253→          </button>
+   254→        </CollapsibleTrigger>
+   255→
+   256→        <CollapsibleContent>
+   257→          <div className="grid gap-5 border-t border-border px-3 py-3 lg:grid-cols-[1fr_340px]">
+   258→            {/* ------- Colonne gauche : scénario ------- */}
+   259→            <div className="min-w-0 space-y-5">
+   260→              <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+   261→                <ScenarioField
+   262→                  id="scenario-active-users"
+   263→                  label="Utilisateurs actifs"
+   264→                  icon={Users}
+   265→                >
+   266→                  <ScenarioNumberInput
+   267→                    id="scenario-active-users"
+   268→                    value={scenario.activeUsers}
+   269→                    min={1}
+   270→                    ariaLabel="Utilisateurs actifs"
+   271→                    onCommit={(value) => setScenario({ activeUsers: value })}
+   272→                  />
+   273→                </ScenarioField>
+   274→
+   275→                <ScenarioField
+   276→                  id="scenario-rps"
+   277→                  label="Requêtes/s cibles"
+   278→                  icon={Gauge}
+   279→                  help="≠ utilisateurs : un utilisateur émet des requêtes par intermittence."
+   280→                >
+   281→                  <ScenarioNumberInput
+   282→                    id="scenario-rps"
+   283→                    value={scenario.requestsPerSecond}
+   284→                    min={1}
+   285→                    ariaLabel="Requêtes par seconde cibles"
+   286→                    onCommit={(value) => setScenario({ requestsPerSecond: value })}
+   287→                  />
+   288→                </ScenarioField>
+   289→
+   290→                <ScenarioField id="scenario-duration" label="Durée (s)" icon={Clock}>
+   291→                  <ScenarioNumberInput
+   292→                    id="scenario-duration"
+   293→                    value={scenario.durationSec}
+   294→                    min={10}
+   295→                    max={600}
+   296→                    ariaLabel="Durée de simulation en secondes"
+   297→                    onCommit={(value) => setScenario({ durationSec: value })}
+   298→                  />
+   299→                </ScenarioField>
+   300→
+   301→                <ScenarioField id="scenario-profile" label="Profil de trafic" icon={Gauge}>
+   302→                  <Select
+   303→                    value={scenario.profile}
+   304→                    onValueChange={(value) =>
+   305→                      setScenario({ profile: value as TrafficProfile })
+   306→                    }
+   307→                  >
+   308→                    <SelectTrigger
+   309→                      id="scenario-profile"
+   310→                      className="h-8 w-full"
+   311→                      aria-label="Profil de trafic"
+   312→                    >
+   313→                      <SelectValue />
+   314→                    </SelectTrigger>
+   315→                    <SelectContent>
+   316→                      {PROFILE_OPTIONS.map((option) => (
+   317→                        <SelectItem key={option.value} value={option.value}>
+   318→                          {option.label}
+   319→                        </SelectItem>
+   320→                      ))}
+   321→                    </SelectContent>
+   322→                  </Select>
+   323→                </ScenarioField>
+   324→
+   325→                <div className="space-y-1.5">
+   326→                  <div className="flex items-baseline justify-between">
+   327→                    <Label
+   328→                      htmlFor="scenario-read-ratio"
+   329→                      className="flex items-center gap-1.5 text-xs font-medium"
+   330→                    >
+   331→                      <Users className="size-3.5 text-muted-foreground" />
+   332→                      Lecture / Écriture
+   333→                    </Label>
+   334→                    <span className="text-xs font-medium tabular-nums">
+   335→                      {formatPercent(scenario.readRatio, 0)} /{" "}
+   336→                      {formatPercent(1 - scenario.readRatio, 0)}
+   337→                    </span>
+   338→                  </div>
+   339→                  <Slider
+   340→                    id="scenario-read-ratio"
+   341→                    min={0}
+   342→                    max={100}
+   343→                    step={1}
+   344→                    value={[Math.round(scenario.readRatio * 100)]}
+   345→                    onValueChange={(values) =>
+   346→                      setScenario({ readRatio: values[0] / 100 })
+   347→                    }
+   348→                    aria-label="Proportion de lectures"
+   349→                  />
+   350→                </div>
+   351→
+   352→                <ScenarioField id="scenario-latency" label="Latence réseau (ms)" icon={Zap}>
+   353→                  <ScenarioNumberInput
+   354→                    id="scenario-latency"
+   355→                    value={scenario.networkLatencyMs}
+   356→                    min={0}
+   357→                    ariaLabel="Latence réseau de base en millisecondes"
+   358→                    onCommit={(value) => setScenario({ networkLatencyMs: value })}
+   359→                  />
+   360→                </ScenarioField>
+   361→
+   362→                <ScenarioField
+   363→                  id="scenario-error-rate"
+   364→                  label="Taux d'erreur initial (%)"
+   365→                  icon={TriangleAlert}
+   366→                >
+   367→                  <ScenarioNumberInput
+   368→                    id="scenario-error-rate"
+   369→                    value={Math.round(scenario.baseErrorRate * 1000) / 10}
+   370→                    min={0}
+   371→                    max={100}
+   372→                    step={0.1}
+   373→                    ariaLabel="Taux d'erreur initial en pourcentage"
+   374→                    onCommit={(value) => setScenario({ baseErrorRate: value / 100 })}
+   375→                  />
+   376→                </ScenarioField>
+   377→
+   378→                <ScenarioField id="scenario-mode" label="Mode" icon={CheckCircle2}>
+   379→                  <Select
+   380→                    value={scenario.mode}
+   381→                    onValueChange={(value) => setScenario({ mode: value as SimulationMode })}
+   382→                  >
+   383→                    <SelectTrigger
+   384→                      id="scenario-mode"
+   385→                      className="h-8 w-full"
+   386→                      aria-label="Mode de simulation"
+   387→                    >
+   388→                      <SelectValue />
+   389→                    </SelectTrigger>
+   390→                    <SelectContent>
+   391→                      {MODE_OPTIONS.map((option) => (
+   392→                        <SelectItem key={option.value} value={option.value}>
+   393→                          {option.label}
+   394→                        </SelectItem>
+   395→                      ))}
+   396→                    </SelectContent>
+   397→                  </Select>
+   398→                </ScenarioField>
+   399→              </div>
+   400→
+   401→              {/* ------- Panne simulée ------- */}
+   402→              <Collapsible
+   403→                open={failureOpen}
+   404→                onOpenChange={(nextOpen) => {
+   405→                  setManualFailureOpen(nextOpen);
+   406→                  if (nextOpen && !scenario.failure) {
+   407→                    // État frais au moment de l'ouverture : pas d'abonnement
+   408→                    // au tableau des nœuds pour la barre entière.
+   409→                    const first = useEditorStore.getState().nodes[0];
+   410→                    if (first) setScenario({ failure: defaultFailure(first.id) });
+   411→                  }
+   412→                }}
+   413→              >
+   414→                <div className="rounded-lg border border-border">
+   415→                  <CollapsibleTrigger asChild>
+   416→                    <button
+   417→                      type="button"
+   418→                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+   419→                      aria-expanded={failureOpen}
+   420→                    >
+   421→                      <TriangleAlert className="size-3.5 text-warning" />
+   422→                      Panne simulée
+   423→                      {scenario.failure ? (
+   424→                        <span className="font-normal text-muted-foreground">
+   425→                          — {scenario.failure.kind === "outage" ? "coupure" : "dégradation"}{" "}
+   426→                          configurée
+   427→                        </span>
+   428→                      ) : (
+   429→                        <span className="font-normal text-muted-foreground">
+   430→                          — configurer une panne
+   431→                        </span>
+   432→                      )}
+   433→                      <ChevronDown
+   434→                        className={cn(
+   435→                          "ml-auto size-3.5 text-muted-foreground transition-transform",
+   436→                          !failureOpen && "-rotate-90",
+   437→                        )}
+   438→                      />
+   439→                    </button>
+   440→                  </CollapsibleTrigger>
+   441→                  <CollapsibleContent>
+   442→                    <div className="grid gap-x-4 gap-y-3 border-t border-border px-3 py-3 sm:grid-cols-2 xl:grid-cols-3">
+   443→                      {scenario.failure ? (
+   444→                        <>
+   445→                          <div className="space-y-1.5">
+   446→                            <Label
+   447→                              htmlFor="failure-node"
+   448→                              className="flex items-center gap-1.5 text-xs font-medium"
+   449→                            >
+   450→                              <Gauge className="size-3.5 text-muted-foreground" />
+   451→                              Nœud cible
+   452→                            </Label>
+   453→                            <FailureNodeSelect
+   454→                              value={scenario.failure.nodeId}
+   455→                              onValueChange={(value) => patchFailure({ nodeId: value })}
+   456→                            />
+   457→                          </div>
+   458→                          <div className="space-y-1.5">
+   459→                            <Label htmlFor="failure-start" className="text-xs font-medium">
+   460→                              Début (s)
+   461→                            </Label>
+   462→                            <ScenarioNumberInput
+   463→                              id="failure-start"
+   464→                              value={scenario.failure.startSec}
+   465→                              min={0}
+   466→                              ariaLabel="Début de la panne en secondes"
+   467→                              onCommit={(value) => patchFailure({ startSec: value })}
+   468→                            />
+   469→                          </div>
+   470→                          <div className="space-y-1.5">
+   471→                            <Label htmlFor="failure-duration" className="text-xs font-medium">
+   472→                              Durée (s)
+   473→                            </Label>
+   474→                            <ScenarioNumberInput
+   475→                              id="failure-duration"
+   476→                              value={scenario.failure.durationSec}
+   477→                              min={1}
+   478→                              ariaLabel="Durée de la panne en secondes"
+   479→                              onCommit={(value) => patchFailure({ durationSec: value })}
+   480→                            />
+   481→                          </div>
+   482→                          <div className="space-y-1.5">
+   483→                            <Label htmlFor="failure-kind" className="text-xs font-medium">
+   484→                              Type de panne
+   485→                            </Label>
+   486→                            <Select
+   487→                              value={scenario.failure.kind}
+   488→                              onValueChange={(value) =>
+   489→                                patchFailure({
+   490→                                  kind: value as FailureScenario["kind"],
+   491→                                })
+   492→                              }
+   493→                            >
+   494→                              <SelectTrigger
+   495→                                id="failure-kind"
+   496→                                className="h-8 w-full"
+   497→                                aria-label="Type de panne"
+   498→                              >
+   499→                                <SelectValue />
+   500→                              </SelectTrigger>
+   501→                              <SelectContent>
+   502→                                <SelectItem value="outage">Coupure (indisponible)</SelectItem>
+   503→                                <SelectItem value="degradation">Dégradation (ralenti)</SelectItem>
+   504→                              </SelectContent>
+   505→                            </Select>
+   506→                          </div>
+   507→                          {scenario.failure.kind === "degradation" && (
+   508→                            <div className="space-y-1.5">
+   509→                              <div className="flex items-baseline justify-between">
+   510→                                <Label
+   511→                                  htmlFor="failure-severity"
+   512→                                  className="text-xs font-medium"
+   513→                                >
+   514→                                  Sévérité
+   515→                                </Label>
+   516→                                <span className="text-xs font-medium tabular-nums">
+   517→                                  {formatPercent(scenario.failure.severity, 0)}
+   518→                                </span>
+   519→                              </div>
+   520→                              <Slider
+   521→                                id="failure-severity"
+   522→                                min={0}
+   523→                                max={100}
+   524→                                step={5}
+   525→                                value={[Math.round(scenario.failure.severity * 100)]}
+   526→                                onValueChange={(values) =>
+   527→                                  patchFailure({ severity: values[0] / 100 })
+   528→                                }
+   529→                                aria-label="Sévérité de la dégradation"
+   530→                              />
+   531→                            </div>
+   532→                          )}
+   533→                          <div className="space-y-1.5">
+   534→                            <Label
+   535→                              htmlFor="failure-recovery"
+   536→                              className="text-xs font-medium"
+   537→                            >
+   538→                              Récupération (s)
+   539→                            </Label>
+   540→                            <ScenarioNumberInput
+   541→                              id="failure-recovery"
+   542→                              value={scenario.failure.recoverySec}
+   543→                              min={0}
+   544→                              ariaLabel="Temps de récupération en secondes"
+   545→                              onCommit={(value) => patchFailure({ recoverySec: value })}
+   546→                            />
+   547→                          </div>
+   548→                          <div className="sm:col-span-2 xl:col-span-3">
+   549→                            <Button
+   550→                              type="button"
+   551→                              variant="ghost"
+   552→                              size="sm"
+   553→                              className="h-7 text-xs text-muted-foreground"
+   554→                              onClick={() => {
+   555→                                setScenario({ failure: null });
+   556→                                setManualFailureOpen(false);
+   557→                              }}
+   558→                            >
+   559→                              Supprimer la panne
+   560→                            </Button>
+   561→                          </div>
+   562→                        </>
+   563→                      ) : nodeCount > 0 ? (
+   564→                        <div className="sm:col-span-2 xl:col-span-3">
+   565→                          <Button
+   566→                            type="button"
+   567→                            variant="outline"
+   568→                            size="sm"
+   569→                            className="h-7 text-xs"
+   570→                            onClick={() => {
+   571→                              const first = useEditorStore.getState().nodes[0];
+   572→                              if (first) {
+   573→                                setScenario({ failure: defaultFailure(first.id) });
+   574→                              }
+   575→                            }}
+   576→                          >
+   577→                            Configurer une panne sur « {firstNodeLabel} »
+   578→                          </Button>
+   579→                        </div>
+   580→                      ) : (
+   581→                        <p className="text-xs text-muted-foreground sm:col-span-2 xl:col-span-3">
+   582→                          Ajoutez au moins un composant pour configurer une panne
+   583→                          simulée (coupure ou dégradation d&apos;un nœud).
+   584→                        </p>
+   585→                      )}
+   586→                    </div>
+   587→                  </CollapsibleContent>
+   588→                </div>
+   589→              </Collapsible>
+   590→
+   591→              {/* ------- Avancé ------- */}
+   592→              <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+   593→                <div className="rounded-lg border border-border">
+   594→                  <CollapsibleTrigger asChild>
+   595→                    <button
+   596→                      type="button"
+   597→                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+   598→                      aria-expanded={advancedOpen}
+   599→                    >
+   600→                      <RefreshCw className="size-3.5 text-muted-foreground" />
+   601→                      Avancé
+   602→                      <ChevronDown
+   603→                        className={cn(
+   604→                          "ml-auto size-3.5 text-muted-foreground transition-transform",
+   605→                          !advancedOpen && "-rotate-90",
+   606→                        )}
+   607→                      />
+   608→                    </button>
+   609→                  </CollapsibleTrigger>
+   610→                  <CollapsibleContent>
+   611→                    <div className="grid gap-x-4 gap-y-3 border-t border-border px-3 py-3 sm:grid-cols-3">
+   612→                      <div className="space-y-1.5">
+   613→                        <Label htmlFor="scenario-seed" className="text-xs font-medium">
+   614→                          Seed (reproductibilité)
+   615→                        </Label>
+   616→                        <div className="flex items-center gap-1">
+   617→                          <ScenarioNumberInput
+   618→                            id="scenario-seed"
+   619→                            value={scenario.seed}
+   620→                            min={0}
+   621→                            ariaLabel="Graine aléatoire"
+   622→                            onCommit={(value) =>
+   623→                              setScenario({ seed: Math.floor(value) })
+   624→                            }
+   625→                          />
+   626→                          <Button
+   627→                            type="button"
+   628→                            variant="outline"
+   629→                            size="icon"
+   630→                            className="size-8 shrink-0"
+   631→                            aria-label="Seed aléatoire"
+   632→                            title="Générer une seed aléatoire"
+   633→                            onClick={() =>
+   634→                              setScenario({
+   635→                                seed: Math.floor(Math.random() * 1_000_000),
+   636→                              })
+   637→                            }
+   638→                          >
+   639→                            <RefreshCw className="size-3.5" />
+   640→                          </Button>
+   641→                        </div>
+   642→                      </div>
+   643→                      <div className="space-y-1.5">
+   644→                        <Label htmlFor="scenario-budget" className="text-xs font-medium">
+   645→                          Budget ($/mois)
+   646→                        </Label>
+   647→                        <ScenarioNumberInput
+   648→                          id="scenario-budget"
+   649→                          value={scenario.budgetPerMonthUsd}
+   650→                          min={0}
+   651→                          ariaLabel="Budget mensuel en dollars"
+   652→                          onCommit={(value) => setScenario({ budgetPerMonthUsd: value })}
+   653→                        />
+   654→                      </div>
+   655→                      <div className="space-y-1.5">
+   656→                        <Label htmlFor="scenario-size" className="text-xs font-medium">
+   657→                          Taille requête (Ko)
+   658→                        </Label>
+   659→                        <ScenarioNumberInput
+   660→                          id="scenario-size"
+   661→                          value={scenario.requestSizeKb}
+   662→                          min={0.1}
+   663→                          step={1}
+   664→                          ariaLabel="Taille moyenne des requêtes en kilooctets"
+   665→                          onCommit={(value) => setScenario({ requestSizeKb: value })}
+   666→                        />
+   667→                      </div>
+   668→                    </div>
+   669→                  </CollapsibleContent>
+   670→                </div>
+   671→              </Collapsible>
+   672→            </div>
+   673→
+   674→            {/* ------- Colonne droite : lancement + état ------- */}
+   675→            <div className="flex flex-col gap-4 border-t border-border pt-4 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-5">
+   676→              <div className="space-y-2">
+   677→                <Button
+   678→                  type="button"
+   679→                  size="lg"
+   680→                  className="w-full sm:w-auto"
+   681→                  disabled={running}
+   682→                  onClick={() => void launchSimulation()}
+   683→                >
+   684→                  <Play className="size-4" />
+   685→                  Lancer la simulation
+   686→                </Button>
+   687→                <p className="text-[11px] leading-snug text-muted-foreground">
+   688→                  Les résultats s&apos;ouvrent automatiquement à la fin du calcul ;
+   689→                  l&apos;éditeur conserve son état.
+   690→                </p>
+   691→              </div>
+   692→
+   693→              <div className="space-y-2.5">
+   694→                <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+   695→                  État de la simulation
+   696→                </h4>
+   697→
+   698→                {/* Région live : progression, fin, erreur et dernier résultat
+   699→                    sont annoncés aux lecteurs d'écran sans vol de focus.
+   700→                    L'erreur porte en plus role="alert" (annonce immédiate). */}
+   701→                <div aria-live="polite" className="space-y-2.5">
+   702→                  {running ? (
+   703→                    <>
+   704→                      <p className="flex items-start gap-2 text-xs">
+   705→                        <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary" />
+   706→                        <span>
+   707→                          Simulation en cours
+   708→                          {progress
+   709→                            ? ` — ${progress.phase} (${Math.round(progress.progress * 100)} %)`
+   710→                            : ""}
+   711→                        </span>
+   712→                      </p>
+   713→                      <Progress
+   714→                        value={(progress?.progress ?? 0) * 100}
+   715→                        aria-label="Progression de la simulation"
+   716→                      />
+   717→                      <Button
+   718→                        type="button"
+   719→                        variant="outline"
+   720→                        size="sm"
+   721→                        className="text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+   722→                        onClick={abort}
+   723→                      >
+   724→                        <Square className="size-3.5" />
+   725→                        Interrompre
+   726→                      </Button>
+   727→                    </>
+   728→                  ) : status === "error" ? (
+   729→                    <p
+   730→                      role="alert"
+   731→                      className="flex items-start gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
+   732→                    >
+   733→                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+   734→                      {error ?? "La simulation a échoué."}
+   735→                    </p>
+   736→                  ) : result ? (
+   737→                    <>
+   738→                      <p className="flex items-start gap-2 text-xs">
+   739→                        <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
+   740→                        <span>
+   741→                          Dernier résultat : {formatRps(result.overall.servedRps)} servis ·
+   742→                          p95 {formatMs(result.overall.p95Ms)}
+   743→                        </span>
+   744→                      </p>
+   745→                      <Button
+   746→                        type="button"
+   747→                        variant="outline"
+   748→                        size="sm"
+   749→                        onClick={() => useAppStore.getState().openResult(result)}
+   750→                      >
+   751→                        Voir les résultats
+   752→                      </Button>
+   753→                    </>
+   754→                  ) : (
+   755→                    <p className="flex items-start gap-2 text-xs text-muted-foreground">
+   756→                      <Info className="mt-0.5 size-3.5 shrink-0 text-info" />
+   757→                      Prêt à lancer la simulation.
+   758→                    </p>
+   759→                  )}
+   760→
+   761→                  {!running && !result && (
+   762→                    <p className="text-xs text-muted-foreground/70">
+   763→                      Aucun résultat pour le moment.
+   764→                    </p>
+   765→                  )}
+   766→                </div>
+   767→              </div>
+   768→            </div>
+   769→          </div>
+   770→        </CollapsibleContent>
+   771→      </div>
+   772→    </Collapsible>
+   773→  );
+   774→});
+   775→

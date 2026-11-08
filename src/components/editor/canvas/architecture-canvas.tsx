@@ -388,6 +388,12 @@ export function ArchitectureCanvas() {
       ) {
         return;
       }
+      // Raccourcis mutateurs neutralisés derrière une modale ouverte
+      // (dialogue de garde anti-perte, Sheet mobile, popovers) : Delete ou
+      // Ctrl+Z ne doivent pas agir « à l'aveugle » sur le canvas masqué.
+      if (document.querySelector('[role="dialog"][data-state="open"]')) {
+        return;
+      }
       const store = useEditorStore.getState();
 
       if (event.key === "Delete" || event.key === "Backspace") {
@@ -410,6 +416,10 @@ export function ArchitectureCanvas() {
         store.copySelection();
       } else if (key === "v") {
         store.paste();
+      } else if (key === "s") {
+        // Ctrl+S : sauvegarde explicite (relai vers la barre d'outils).
+        event.preventDefault();
+        store.requestSave();
       }
     };
     document.addEventListener("keydown", handler);
@@ -516,7 +526,7 @@ export function ArchitectureCanvas() {
                   "cursor-pointer rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
               >
-                Nouvelle du modèle API scalable
+                Partir du modèle « API scalable »
               </button>
             </div>
           </div>

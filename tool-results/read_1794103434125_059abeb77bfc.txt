@@ -1,0 +1,894 @@
+     1→import { COMPONENT_MAP } from "@/data/catalog";
+     2→import type {
+     3→  ArchEdge,
+     4→  ArchNode,
+     5→  ArchZone,
+     6→  ArchitectureData,
+     7→  ArchitectureTemplate,
+     8→  Protocol,
+     9→  ScenarioConfig,
+    10→  ZoneColor,
+    11→} from "@/types";
+    12→
+    13→/**
+    14→ * SystemLab — Modèles d'architecture préconfigurés.
+    15→ * Chaque modèle est un graphe valide (componentId existants, connexions
+    16→ * autorisées par validateConnection) prêt à simuler.
+    17→ */
+    18→
+    19→type ConfigValue = number | string | boolean;
+    20→
+    21→export const DEFAULT_SCENARIO: ScenarioConfig = {
+    22→  activeUsers: 5000,
+    23→  requestsPerSecond: 3500,
+    24→  durationSec: 120,
+    25→  readRatio: 0.8,
+    26→  networkLatencyMs: 20,
+    27→  baseErrorRate: 0.001,
+    28→  requestSizeKb: 8,
+    29→  profile: "constant",
+    30→  mode: "load",
+    31→  seed: 42,
+    32→  budgetPerMonthUsd: 2000,
+    33→  failure: null,
+    34→};
+    35→
+    36→function scenario(overrides: Partial<ScenarioConfig>): ScenarioConfig {
+    37→  return { ...DEFAULT_SCENARIO, ...overrides };
+    38→}
+    39→
+    40→function node(
+    41→  id: string,
+    42→  componentId: string,
+    43→  label: string,
+    44→  x: number,
+    45→  y: number,
+    46→  config: Record<string, ConfigValue> = {},
+    47→  zoneId?: string,
+    48→): ArchNode {
+    49→  const base = COMPONENT_MAP[componentId]?.defaults ?? {};
+    50→  return {
+    51→    id,
+    52→    componentId,
+    53→    label,
+    54→    config: { ...base, ...config },
+    55→    position: { x, y },
+    56→    zoneId,
+    57→  };
+    58→}
+    59→
+    60→function edge(
+    61→  id: string,
+    62→  source: string,
+    63→  target: string,
+    64→  protocol: Protocol = "http",
+    65→  networkLatencyMs = 2,
+    66→  bandwidthMbps = 100,
+    67→  label?: string,
+    68→): ArchEdge {
+    69→  return { id, source, target, protocol, networkLatencyMs, bandwidthMbps, label };
+    70→}
+    71→
+    72→function zone(
+    73→  id: string,
+    74→  label: string,
+    75→  color: ZoneColor,
+    76→  x: number,
+    77→  y: number,
+    78→  width: number,
+    79→  height: number,
+    80→): ArchZone {
+    81→  return { id, label, color, position: { x, y }, size: { width, height } };
+    82→}
+    83→
+    84→function data(
+    85→  name: string,
+    86→  description: string,
+    87→  nodes: ArchNode[],
+    88→  edges: ArchEdge[],
+    89→  zones: ArchZone[],
+    90→  scenarioConfig: ScenarioConfig,
+    91→): ArchitectureData {
+    92→  return { name, description, nodes, edges, zones, scenario: scenarioConfig };
+    93→}
+    94→
+    95→export const TEMPLATES: ArchitectureTemplate[] = [
+    96→  /* ------------------------------------------------------------------
+    97→   * 1. API scalable — reproduit la maquette officielle
+    98→   * ------------------------------------------------------------------ */
+    99→  {
+   100→    id: "api-scalable",
+   101→    name: "API scalable",
+   102→    description:
+   103→      "Architecture de référence : CDN + Load Balancer L7 devant trois serveurs API, cache Redis et PostgreSQL. Le niveau API tourne à ~85 % d'utilisation sous 3 500 req/s — un goulot pédagogique idéal.",
+   104→    difficulty: "intermédiaire",
+   105→    tags: ["api", "cache", "load balancing", "référence"],
+   106→    data: data(
+   107→      "API scalable",
+   108→      "Modèle de référence SystemLab : edge, répartition, pool applicatif, cache et persistance.",
+   109→      [
+   110→        node("n1", "user", "Utilisateur", 80, 90, {}, "z1"),
+   111→        node("n2", "cdn", "CDN", 420, 90, { cacheHitRatio: 0.35 }, "z1"),
+   112→        node("n3", "load-balancer-l7", "Load Balancer L7", 760, 90, {}, "z1"),
+   113→        node("n4", "api-server", "API Server 1", 680, 350, { instances: 1, avgServiceMs: 45 }, "z2"),
+   114→        node("n5", "api-server", "API Server 2", 680, 450, { instances: 1, avgServiceMs: 45 }, "z2"),
+   115→        node("n6", "api-server", "API Server 3", 680, 550, { instances: 1, avgServiceMs: 45 }, "z2"),
+   116→        node("n7", "redis", "Redis", 920, 450, { hitRatio: 0.75 }, "z2"),
+   117→        node("n8", "postgresql", "PostgreSQL", 920, 930, {}, "z4"),
+   118→        node("n9", "logs", "Logs", 70, 920, {}, "z3"),
+   119→        node("n10", "metriques", "Métriques", 210, 920, {}, "z3"),
+   120→        node("n11", "traces-distribuees", "Traces distribuées", 340, 920, {}, "z3"),
+   121→        node("n12", "alertes", "Alertes", 470, 920, {}, "z3"),
+   122→      ],
+   123→      [
+   124→        edge("e1", "n1", "n2", "https", 20, 50),
+   125→        edge("e2", "n2", "n3", "https", 5, 200),
+   126→        edge("e3", "n3", "n4", "http", 2, 200),
+   127→        edge("e4", "n3", "n5", "http", 2, 200),
+   128→        edge("e5", "n3", "n6", "http", 2, 200),
+   129→        edge("e6", "n4", "n7", "redis", 2, 100),
+   130→        edge("e7", "n5", "n7", "redis", 2, 100),
+   131→        edge("e8", "n6", "n7", "redis", 2, 100),
+   132→        edge("e9", "n7", "n8", "sql", 4, 100, "miss"),
+   133→      ],
+   134→      [
+   135→        zone("z1", "Clients", "indigo", 40, 40, 1100, 200),
+   136→        zone("z2", "Backend", "cyan", 620, 300, 520, 500),
+   137→        zone("z3", "Observabilité", "violet", 40, 860, 520, 220),
+   138→        zone("z4", "Données", "emerald", 620, 860, 520, 220),
+   139→      ],
+   140→      DEFAULT_SCENARIO,
+   141→    ),
+   142→  },
+   143→
+   144→  /* ------------------------------------------------------------------
+   145→   * 2. API simple
+   146→   * ------------------------------------------------------------------ */
+   147→  {
+   148→    id: "api-simple",
+   149→    name: "API simple",
+   150→    description:
+   151→      "Le trio minimal : un utilisateur, un serveur applicatif, une base PostgreSQL. Point de départ pour comprendre la latence de bout en bout et la capacité d'un serveur.",
+   152→    difficulty: "débutant",
+   153→    tags: ["api", "sql", "minimal"],
+   154→    data: data(
+   155→      "API simple",
+   156→      "Chaîne applicative minimale : requête, traitement, persistance.",
+   157→      [
+   158→        node("n1", "user", "Utilisateur", 100, 200),
+   159→        node("n2", "api-server", "API Server", 400, 200, { instances: 2 }),
+   160→        node("n3", "postgresql", "PostgreSQL", 700, 200),
+   161→      ],
+   162→      [
+   163→        edge("e1", "n1", "n2", "https", 20, 50),
+   164→        edge("e2", "n2", "n3", "sql", 4, 100),
+   165→      ],
+   166→      [],
+   167→      scenario({ activeUsers: 800, requestsPerSecond: 500 }),
+   168→    ),
+   169→  },
+   170→
+   171→  /* ------------------------------------------------------------------
+   172→   * 3. Trois tiers
+   173→   * ------------------------------------------------------------------ */
+   174→  {
+   175→    id: "three-tier",
+   176→    name: "Application trois tiers",
+   177→    description:
+   178→      "Architecture web classique : Load Balancer L7 répartissant la charge sur deux serveurs API partagant une base. Première étape du scaling horizontal.",
+   179→    difficulty: "débutant",
+   180→    tags: ["api", "load balancing", "sql"],
+   181→    data: data(
+   182→      "Application trois tiers",
+   183→      "Répartiteur, pool applicatif redondé et base partagée.",
+   184→      [
+   185→        node("n1", "user", "Utilisateur", 80, 200),
+   186→        node("n2", "load-balancer-l7", "Load Balancer L7", 360, 200),
+   187→        node("n3", "api-server", "API Server 1", 640, 120, { instances: 2 }, "z1"),
+   188→        node("n4", "api-server", "API Server 2", 640, 320, { instances: 2 }, "z1"),
+   189→        node("n5", "postgresql", "PostgreSQL", 920, 220),
+   190→      ],
+   191→      [
+   192→        edge("e1", "n1", "n2", "https", 20, 50),
+   193→        edge("e2", "n2", "n3", "http", 2, 200),
+   194→        edge("e3", "n2", "n4", "http", 2, 200),
+   195→        edge("e4", "n3", "n5", "sql", 4, 100),
+   196→        edge("e5", "n4", "n5", "sql", 4, 100),
+   197→      ],
+   198→      [zone("z1", "Serveurs applicatifs", "emerald", 600, 80, 340, 360)],
+   199→      scenario({ activeUsers: 2500, requestsPerSecond: 1500 }),
+   200→    ),
+   201→  },
+   202→
+   203→  /* ------------------------------------------------------------------
+   204→   * 4. Application de messagerie
+   205→   *
+   206→   * Routage moteur : lectures → cache (miss → PostgreSQL), écritures →
+   207→   * file → worker → e-mail. L'ancienne forme (API → [file, PostgreSQL])
+   208→   * laissait la file et le worker morts : la priorité d'écriture du rôle
+   209→   * serveur envoie tout vers la base quand elle est présente.
+   210→   * ------------------------------------------------------------------ */
+   211→  {
+   212→    id: "messagerie-app",
+   213→    name: "Application de messagerie",
+   214→    description:
+   215→      "Parcours mixte synchrone/asynchrone : les lectures passent par le cache (miss → PostgreSQL), les envois partent dans une file ; un worker consomme à son rythme et déclenche l'e-mail de notification.",
+   216→    difficulty: "intermédiaire",
+   217→    tags: ["asynchrone", "file", "cache", "worker"],
+   218→    data: data(
+   219→      "Application de messagerie",
+   220→      "Lectures servies par le cache, envois asynchrones via file et worker.",
+   221→      [
+   222→        node("n1", "user", "Utilisateur", 80, 240),
+   223→        node("n2", "api-server", "API messages", 340, 240, { instances: 2, avgServiceMs: 40 }),
+   224→        node("n3", "message-queue", "File de messages", 620, 400, {}, "z2"),
+   225→        node("n4", "worker", "Worker d'envoi", 900, 400, { instances: 2, avgProcessingMs: 80 }, "z2"),
+   226→        node("n5", "service-email", "Service e-mail", 1180, 400, {}, "z2"),
+   227→        node("n6", "postgresql", "PostgreSQL", 900, 120, {}, "z1"),
+   228→        node("n7", "redis", "Cache de conversations", 620, 120, { hitRatio: 0.75 }, "z1"),
+   229→      ],
+   230→      [
+   231→        edge("e1", "n1", "n2", "https", 20, 50),
+   232→        edge("e2", "n2", "n7", "redis", 2, 100, "lectures"),
+   233→        edge("e3", "n7", "n6", "sql", 4, 100, "miss"),
+   234→        edge("e4", "n2", "n3", "amqp", 3, 100, "envois"),
+   235→        edge("e5", "n3", "n4", "amqp", 3, 100),
+   236→        edge("e6", "n4", "n5", "https", 10, 50, "notification"),
+   237→      ],
+   238→      [
+   239→        zone("z1", "Chemin de lecture", "cyan", 580, 80, 610, 144),
+   240→        zone("z2", "Chemin asynchrone", "amber", 580, 360, 850, 144),
+   241→      ],
+   242→      scenario({ activeUsers: 1200, requestsPerSecond: 800 }),
+   243→    ),
+   244→  },
+   245→
+   246→  /* ------------------------------------------------------------------
+   247→   * 5. Marketplace
+   248→   *
+   249→   * API catalogue : lectures → Redis (miss → PostgreSQL), écritures →
+   250→   * PostgreSQL. API commandes : tout passe par la file (acquittement 202,
+   251→   * worker + e-mail de confirmation) — la file n'est plus court-circuitée
+   252→   * par la priorité d'écriture base > file.
+   253→   * ------------------------------------------------------------------ */
+   254→  {
+   255→    id: "marketplace",
+   256→    name: "Marketplace",
+   257→    description:
+   258→      "Boutique complète : CDN et Load Balancer L7, l'API catalogue sert les lectures via Redis (miss → PostgreSQL), et l'API commandes passe par la branche asynchrone (file + worker + e-mails de confirmation).",
+   259→    difficulty: "intermédiaire",
+   260→    tags: ["e-commerce", "cache", "asynchrone", "cdn"],
+   261→    data: data(
+   262→      "Marketplace",
+   263→      "Frontal complet, catalogue cacheable et traitement différé des commandes.",
+   264→      [
+   265→        node("n1", "user", "Utilisateur", 80, 300, {}, "z1"),
+   266→        node("n2", "cdn", "CDN", 360, 300, { cacheHitRatio: 0.85 }, "z1"),
+   267→        node("n3", "load-balancer-l7", "Load Balancer L7", 640, 300, {}, "z2"),
+   268→        node("n4", "api-server", "API catalogue", 920, 180, { instances: 3, avgServiceMs: 45 }, "z2"),
+   269→        node("n5", "api-server", "API commandes", 920, 420, { instances: 3, avgServiceMs: 45 }, "z2"),
+   270→        node("n6", "redis", "Redis", 1200, 80, { hitRatio: 0.75 }, "z3"),
+   271→        node("n7", "postgresql", "PostgreSQL", 1200, 240, {}, "z3"),
+   272→        node("n8", "message-queue", "File de commandes", 1200, 400, {}, "z4"),
+   273→        node("n9", "worker", "Worker commandes", 1480, 400, { instances: 4, avgProcessingMs: 25 }, "z4"),
+   274→        node("n10", "service-email", "Service e-mail", 1480, 560, {}, "z4"),
+   275→      ],
+   276→      [
+   277→        edge("e1", "n1", "n2", "https", 20, 50),
+   278→        edge("e2", "n2", "n3", "https", 5, 200),
+   279→        edge("e3", "n3", "n4", "http", 2, 200),
+   280→        edge("e4", "n3", "n5", "http", 2, 200),
+   281→        edge("e5", "n4", "n6", "redis", 2, 100, "lectures"),
+   282→        edge("e6", "n6", "n7", "sql", 4, 100, "miss"),
+   283→        edge("e7", "n4", "n7", "sql", 4, 100, "écritures"),
+   284→        edge("e8", "n5", "n8", "amqp", 3, 100, "commandes"),
+   285→        edge("e9", "n8", "n9", "amqp", 3, 100),
+   286→        edge("e10", "n9", "n10", "https", 10, 50, "confirmation"),
+   287→      ],
+   288→      [
+   289→        zone("z1", "Frontal", "indigo", 40, 260, 570, 144),
+   290→        zone("z2", "Backend", "cyan", 600, 140, 570, 400),
+   291→        zone("z3", "Données", "emerald", 1160, 40, 290, 310),
+   292→        zone("z4", "Asynchrone", "amber", 1160, 360, 570, 304),
+   293→      ],
+   294→      scenario({ activeUsers: 4000, requestsPerSecond: 2500, profile: "ramp" }),
+   295→    ),
+   296→  },
+   297→
+   298→  /* ------------------------------------------------------------------
+   299→   * 6. Système de paiement
+   300→   * ------------------------------------------------------------------ */
+   301→  {
+   302→    id: "payment-system",
+   303→    name: "Système de paiement",
+   304→    description:
+   305→      "Paiement critique : passerelle API, service d'encaissement, PostgreSQL en réplication synchrone, réconciliation asynchrone et circuit breaker vers la notification externe.",
+   306→    difficulty: "avancé",
+   307→    tags: ["paiement", "résilience", "circuit breaker", "asynchrone"],
+   308→    data: data(
+   309→      "Système de paiement",
+   310→      "Encaissement synchrone sécurisé, réconciliation différée et protection anti-cascade.",
+   311→      [
+   312→        node("n1", "user", "Utilisateur", 80, 300),
+   313→        node("n2", "api-gateway", "API Gateway", 360, 300, {}, "z1"),
+   314→        node("n3", "service-paiement", "Service paiement", 640, 300, {}, "z1"),
+   315→        node("n4", "postgresql", "PostgreSQL", 920, 160, { replicationPolicy: "sync" }, "z4"),
+   316→        node("n5", "message-queue", "File de réconciliation", 920, 440, {}, "z2"),
+   317→        node("n6", "worker", "Worker de réconciliation", 1200, 440, { instances: 2 }, "z2"),
+   318→        node("n7", "circuit-breaker", "Circuit Breaker", 920, 620, {}, "z3"),
+   319→        node("n8", "service-notification", "Service notification", 1200, 620, {}, "z3"),
+   320→      ],
+   321→      [
+   322→        edge("e1", "n1", "n2", "https", 20, 50),
+   323→        edge("e2", "n2", "n3", "grpc", 3, 100),
+   324→        edge("e3", "n3", "n4", "sql", 4, 100, "transaction"),
+   325→        edge("e4", "n3", "n5", "amqp", 3, 100, "écritures"),
+   326→        edge("e5", "n5", "n6", "amqp", 3, 100),
+   327→        edge("e6", "n3", "n7", "http", 5, 50),
+   328→        edge("e7", "n7", "n8", "https", 10, 50, "externe"),
+   329→      ],
+   330→      [
+   331→        zone("z1", "Cœur paiement", "rose", 340, 260, 570, 144),
+   332→        zone("z2", "Réconciliation", "cyan", 880, 400, 570, 144),
+   333→        zone("z3", "Dépendance externe", "amber", 880, 580, 570, 144),
+   334→        zone("z4", "Persistance", "emerald", 880, 120, 290, 144),
+   335→      ],
+   336→      scenario({ activeUsers: 900, requestsPerSecond: 600 }),
+   337→    ),
+   338→  },
+   339→
+   340→  /* ------------------------------------------------------------------
+   341→   * 7. Plateforme de notifications
+   342→   *
+   343→   * L'API d'ingestion est un PROXY (api-gateway) : il relaie chaque
+   344→   * événement vers le journal PostgreSQL ET vers Kafka (fan-out moteur),
+   345→   * au lieu que la priorité d'écriture serveur n'envoie tout dans la base.
+   346→   * ------------------------------------------------------------------ */
+   347→  {
+   348→    id: "notifications-platform",
+   349→    name: "Plateforme de notifications",
+   350→    description:
+   351→      "Ingestion à 2 000 événements/s : l'API d'ingestion journalise chaque événement dans PostgreSQL et le publie dans Kafka (acquittement 202) ; un groupe de consommateurs dispatche vers e-mail et SMS. Le pic de campagne est le scénario type.",
+   352→    difficulty: "intermédiaire",
+   353→    tags: ["kafka", "asynchrone", "événements"],
+   354→    data: data(
+   355→      "Plateforme de notifications",
+   356→      "Ingestion événementielle sur Kafka et diffusion multi-canal.",
+   357→      [
+   358→        node("n1", "user", "Utilisateur", 80, 240),
+   359→        node("n2", "api-gateway", "API d'ingestion", 360, 240, { latencyMs: 8 }, "z1"),
+   360→        node("n3", "postgresql", "PostgreSQL", 360, 480, {}, "z1"),
+   361→        node("n4", "kafka", "Kafka", 640, 240, { partitions: 6 }, "z2"),
+   362→        node("n5", "consumer-group", "Groupe de consommateurs", 920, 240, { instances: 8 }, "z2"),
+   363→        node("n6", "service-email", "Service e-mail", 1200, 120, {}, "z2"),
+   364→        node("n7", "service-sms", "Service SMS", 1200, 360, {}, "z2"),
+   365→      ],
+   366→      [
+   367→        edge("e1", "n1", "n2", "https", 20, 50),
+   368→        edge("e2", "n2", "n3", "sql", 4, 100, "journal"),
+   369→        edge("e3", "n2", "n4", "kafka", 3, 200, "événements"),
+   370→        edge("e4", "n4", "n5", "kafka", 3, 200),
+   371→        edge("e5", "n5", "n6", "https", 10, 50),
+   372→        edge("e6", "n5", "n7", "https", 10, 50),
+   373→      ],
+   374→      [
+   375→        zone("z1", "Ingestion", "cyan", 320, 200, 290, 390),
+   376→        zone("z2", "Diffusion", "amber", 600, 80, 850, 390),
+   377→      ],
+   378→      scenario({ activeUsers: 3000, requestsPerSecond: 2000, readRatio: 0.2, profile: "spike" }),
+   379→    ),
+   380→  },
+   381→
+   382→  /* ------------------------------------------------------------------
+   383→   * 8. Plateforme vidéo
+   384→   *
+   385→   * L'API d'origine est un PROXY : chaque requête d'origine consulte les
+   386→   * métadonnées (PostgreSQL) ET sert le média (stockage objet) — le
+   387→   * stockage n'est plus court-circuité par la priorité de lecture.
+   388→   * ------------------------------------------------------------------ */
+   389→  {
+   390→    id: "video-platform",
+   391→    name: "Plateforme vidéo",
+   392→    description:
+   393→      "Vidéo à la demande : 90 % des segments servis par le CDN ; les requêtes d'origine touchent l'API d'origine, qui consulte les métadonnées (PostgreSQL) et sert les médias depuis le stockage objet. 3 000 req/s de navigation.",
+   394→    difficulty: "intermédiaire",
+   395→    tags: ["vidéo", "cdn", "stockage objet"],
+   396→    data: data(
+   397→      "Plateforme vidéo",
+   398→      "Edge vidéo, API de métadonnées et stockage objet.",
+   399→      [
+   400→        node("n1", "user", "Utilisateur", 80, 240, {}, "z1"),
+   401→        node("n2", "cdn", "CDN", 360, 240, { cacheHitRatio: 0.9 }, "z1"),
+   402→        node("n3", "load-balancer-l7", "Load Balancer L7", 640, 240, {}),
+   403→        node("n4", "api-gateway", "API d'origine", 920, 240, {}),
+   404→        node("n5", "postgresql", "PostgreSQL", 1200, 120, {}, "z2"),
+   405→        node("n6", "stockage-objet", "Stockage vidéo", 1200, 360, {}, "z2"),
+   406→      ],
+   407→      [
+   408→        edge("e1", "n1", "n2", "https", 20, 100),
+   409→        edge("e2", "n2", "n3", "https", 5, 200),
+   410→        edge("e3", "n3", "n4", "http", 2, 200),
+   411→        edge("e4", "n4", "n5", "sql", 4, 100, "métadonnées"),
+   412→        edge("e5", "n4", "n6", "https", 8, 200, "segments"),
+   413→      ],
+   414→      [
+   415→        zone("z1", "Distribution", "indigo", 40, 200, 570, 144),
+   416→        zone("z2", "Stockage média", "emerald", 1160, 80, 290, 384),
+   417→      ],
+   418→      scenario({ activeUsers: 5000, requestsPerSecond: 3000, requestSizeKb: 16 }),
+   419→    ),
+   420→  },
+   421→
+   422→  /* ------------------------------------------------------------------
+   423→   * 9. Pilotage événementiel (CQRS)
+   424→   * ------------------------------------------------------------------ */
+   425→  {
+   426→    id: "event-driven",
+   427→    name: "Architecture événementielle",
+   428→    description:
+   429→      "CQRS en action : les commandes passent par Kafka et un worker de projection alimente l'index de lecture ; les requêtes de lecture interrogent directement cet index.",
+   430→    difficulty: "avancé",
+   431→    tags: ["cqrs", "kafka", "event driven", "recherche"],
+   432→    data: data(
+   433→      "Architecture événementielle",
+   434→      "Chemin d'écriture par événements, chemin de lecture sur index projeté.",
+   435→      [
+   436→        node("n1", "user", "Utilisateur", 80, 300),
+   437→        node("n2", "api-server", "API commandes", 360, 160, { instances: 2, avgServiceMs: 30 }, "z1"),
+   438→        node("n3", "kafka", "Kafka", 640, 160, { partitions: 6 }, "z1"),
+   439→        node("n4", "worker", "Worker de projection", 920, 160, { instances: 6, avgProcessingMs: 80 }, "z1"),
+   440→        node("n5", "elasticsearch", "Index de lecture", 1200, 280, {}, "z3"),
+   441→        node("n6", "api-server", "API lectures", 360, 480, { instances: 3, avgServiceMs: 25 }, "z2"),
+   442→      ],
+   443→      [
+   444→        edge("e1", "n1", "n2", "https", 20, 50),
+   445→        edge("e2", "n2", "n3", "kafka", 3, 200, "commandes"),
+   446→        edge("e3", "n3", "n4", "kafka", 3, 200),
+   447→        edge("e4", "n4", "n5", "http", 5, 100, "projection"),
+   448→        edge("e5", "n1", "n6", "https", 20, 50),
+   449→        edge("e6", "n6", "n5", "http", 5, 100, "recherche"),
+   450→      ],
+   451→      [
+   452→        zone("z1", "Chemin d'écriture", "cyan", 320, 120, 850, 144),
+   453→        zone("z2", "Chemin de lecture", "indigo", 320, 440, 290, 144),
+   454→        zone("z3", "Index de recherche", "violet", 1160, 240, 290, 144),
+   455→      ],
+   456→      scenario({ activeUsers: 2000, requestsPerSecond: 1200, readRatio: 0.9 }),
+   457→    ),
+   458→  },
+   459→
+   460→  /* ------------------------------------------------------------------
+   461→   * 10. Multi-région
+   462→   *
+   463→   * Les zones de disponibilité sont sur le chemin du trafic (relais
+   464→   * pass-through) : le répartiteur global-route vers la Zone A ou la
+   465→   * Zone B, qui relaient vers l'API de leur région.
+   466→   * ------------------------------------------------------------------ */
+   467→  {
+   468→    id: "multi-region",
+   469→    name: "Déploiement multi-région",
+   470→    description:
+   471→      "Routage global vers deux régions : primaire PostgreSQL en région A, réplique de lecture en région B. Les zones de disponibilité encadrent chaque région et relaient le trafic.",
+   472→    difficulty: "avancé",
+   473→    tags: ["multi-région", "réplication", "haute disponibilité"],
+   474→    data: data(
+   475→      "Déploiement multi-région",
+   476→      "Routage global, primaire en région A et réplique en région B.",
+   477→      [
+   478→        node("n1", "user", "Utilisateur", 80, 400, {}, "z1"),
+   479→        node("n2", "load-balancer-l7", "LB global", 360, 400, {}, "z1"),
+   480→        node("n3", "zone-disponibilite", "Zone A", 580, 160, {}, "z2"),
+   481→        node("n4", "api-server", "API région A", 580, 280, { instances: 2 }, "z2"),
+   482→        node("n5", "postgresql", "Primaire", 880, 280, {}, "z2"),
+   483→        node("n6", "zone-disponibilite", "Zone B", 580, 520, {}, "z3"),
+   484→        node("n7", "api-server", "API région B", 580, 640, { instances: 2 }, "z3"),
+   485→        node("n8", "read-replica", "Réplique lecture", 880, 640, {}, "z3"),
+   486→      ],
+   487→      [
+   488→        edge("e1", "n1", "n2", "https", 20, 50),
+   489→        edge("e2", "n2", "n3", "http", 15, 200, "région A"),
+   490→        edge("e3", "n2", "n6", "http", 15, 200, "région B"),
+   491→        edge("e4", "n3", "n4", "http", 2, 100),
+   492→        edge("e5", "n4", "n5", "sql", 4, 100),
+   493→        edge("e6", "n6", "n7", "http", 2, 100),
+   494→        edge("e7", "n7", "n8", "sql", 4, 100, "lectures"),
+   495→        edge("e8", "n5", "n8", "sql", 40, 50, "réplication"),
+   496→      ],
+   497→      [
+   498→        zone("z1", "Routage global", "indigo", 40, 360, 570, 144),
+   499→        zone("z2", "Région A", "emerald", 540, 120, 590, 270),
+   500→        zone("z3", "Région B", "cyan", 540, 480, 590, 270),
+   501→      ],
+   502→      scenario({ activeUsers: 1500, requestsPerSecond: 1000 }),
+   503→    ),
+   504→  },
+   505→
+   506→  /* ------------------------------------------------------------------
+   507→   * 11. Pipeline RAG
+   508→   * ------------------------------------------------------------------ */
+   509→  {
+   510→    id: "rag-ai",
+   511→    name: "Pipeline RAG",
+   512→    description:
+   513→      "Assistant augmenté : l'API orchestrateur interroge le LLM (900 ms par génération), la base vectorielle, le modèle d'embedding et un cache de prompts Redis. Faible débit, forte latence.",
+   514→    difficulty: "intermédiaire",
+   515→    tags: ["ia", "rag", "llm", "vecteurs"],
+   516→    data: data(
+   517→      "Pipeline RAG",
+   518→      "Orchestration LLM, embeddings, recherche vectorielle et cache de prompts.",
+   519→      [
+   520→        node("n1", "user", "Utilisateur", 80, 240),
+   521→        node("n2", "api-gateway", "Orchestrateur RAG", 360, 240, { latencyMs: 40, capacityRps: 2000 }),
+   522→        node("n3", "llm", "LLM", 640, 60, { avgServiceMs: 900, timeoutMs: 30000 }, "z1"),
+   523→        node("n4", "embedding-model", "Modèle d'embedding", 640, 180, {}, "z1"),
+   524→        node("n5", "vector-database", "Base vectorielle", 640, 300, {}, "z1"),
+   525→        node("n6", "redis", "Cache de prompts", 640, 420, { hitRatio: 0.4 }, "z1"),
+   526→      ],
+   527→      [
+   528→        edge("e1", "n1", "n2", "https", 20, 50),
+   529→        edge("e2", "n2", "n3", "http", 5, 100, "génération"),
+   530→        edge("e3", "n2", "n4", "http", 5, 100, "encodage"),
+   531→        edge("e4", "n2", "n5", "http", 5, 100, "recherche"),
+   532→        edge("e5", "n2", "n6", "redis", 2, 100, "prompts"),
+   533→      ],
+   534→      [zone("z1", "Pipeline IA", "violet", 600, 20, 290, 510)],
+   535→      scenario({
+   536→        activeUsers: 80,
+   537→        requestsPerSecond: 50,
+   538→        readRatio: 0.9,
+   539→        requestSizeKb: 4,
+   540→        durationSec: 120,
+   541→      }),
+   542→    ),
+   543→  },
+   544→
+   545→  /* ==================================================================
+   546→   * GÉANTS DE LA TECH — architectures inspirées des systèmes réels
+   547→   * emblématiques (YouTube, Facebook, WhatsApp, Netflix, Twitter/X,
+   548→   * Uber). Formes de graphes compatibles avec le routage du moteur :
+   549→   * fan-out des proxys, chemins lecture/écriture séparés, files
+   550→   * alimentées par des workers dédiés.
+   551→   * ================================================================== */
+   552→
+   553→  /* ------------------------------------------------------------------
+   554→   * 12. YouTube — diffusion vidéo
+   555→   * ------------------------------------------------------------------ */
+   556→  {
+   557→    id: "youtube-video",
+   558→    name: "YouTube — diffusion vidéo",
+   559→    description:
+   560→      "La chaîne complète de YouTube : 92 % des segments servis par le CDN ; côté créateurs, l'API d'ingestion persiste les métadonnées dans Cassandra, dépose le master sur le stockage objet et publie un événement de transcodage dans Kafka. Les workers de transcodage (400 ms par vidéo) prennent du retard dès que la mise en ligne décolle.",
+   561→    difficulty: "avancé",
+   562→    tags: ["vidéo", "cdn", "transcodage", "kafka", "stockage objet"],
+   563→    data: data(
+   564→      "YouTube — diffusion vidéo",
+   565→      "Distribution edge, ingestion créateurs et pipeline de transcodage asynchrone.",
+   566→      [
+   567→        node("n1", "user", "Spectateurs", 80, 100, { weight: 19 }, "z1"),
+   568→        node("n2", "cdn", "CDN vidéo", 360, 100, { cacheHitRatio: 0.92, capacityRps: 100000 }, "z1"),
+   569→        node("n3", "load-balancer-l7", "LB edge", 640, 100, {}, "z1"),
+   570→        node("n4", "api-gateway", "API vidéo", 920, 100, {}, "z1"),
+   571→        node("n5", "cassandra", "Cassandra — métadonnées", 1240, 60, {}, "z2"),
+   572→        node("n6", "stockage-objet", "Stockage — masters & segments", 1240, 260, {}, "z2"),
+   573→        node("n7", "user", "Créateurs", 80, 480, { weight: 1 }, "z3"),
+   574→        node("n8", "api-gateway", "API d'ingestion", 360, 480, {}, "z3"),
+   575→        node("n9", "kafka", "Kafka — pipeline de transcodage", 640, 480, { partitions: 12 }, "z4"),
+   576→        node("n10", "consumer-group", "Workers de transcodage", 920, 480, { instances: 8, avgProcessingMs: 400, timeoutMs: 10000 }, "z4"),
+   577→      ],
+   578→      [
+   579→        edge("e1", "n1", "n2", "https", 20, 100),
+   580→        edge("e2", "n2", "n3", "https", 5, 200, "miss"),
+   581→        edge("e3", "n3", "n4", "http", 2, 200),
+   582→        edge("e4", "n4", "n5", "grpc", 4, 100, "métadonnées"),
+   583→        edge("e5", "n4", "n6", "https", 8, 200, "segments"),
+   584→        edge("e6", "n7", "n8", "https", 20, 50),
+   585→        edge("e7", "n8", "n5", "grpc", 4, 100, "métadonnées"),
+   586→        edge("e8", "n8", "n6", "https", 10, 200, "master"),
+   587→        edge("e9", "n8", "n9", "kafka", 3, 200, "transcodage"),
+   588→        edge("e10", "n9", "n10", "kafka", 3, 100),
+   589→        edge("e11", "n10", "n6", "https", 10, 200, "renditions"),
+   590→      ],
+   591→      [
+   592→        zone("z1", "Distribution", "indigo", 40, 40, 1120, 190),
+   593→        zone("z2", "Données", "emerald", 1200, 20, 330, 340),
+   594→        zone("z3", "Ingestion créateurs", "cyan", 40, 420, 620, 190),
+   595→        zone("z4", "Transcodage", "amber", 660, 420, 620, 190),
+   596→      ],
+   597→      scenario({
+   598→        activeUsers: 40000,
+   599→        requestsPerSecond: 9000,
+   600→        readRatio: 0.85,
+   601→        requestSizeKb: 16,
+   602→        budgetPerMonthUsd: 12000,
+   603→      }),
+   604→    ),
+   605→  },
+   606→
+   607→  /* ------------------------------------------------------------------
+   608→   * 13. Facebook — fil d'actualité
+   609→   * ------------------------------------------------------------------ */
+   610→  {
+   611→    id: "facebook-feed",
+   612→    name: "Facebook — fil d'actualité",
+   613→    description:
+   614→      "Le fil d'actualité façon Facebook : le CDN absorbe les médias et vignettes, l'API web sert les fils dynamiques, le cache type TAO décharge la réplique de lecture et les écritures tombent dans le MySQL partitionné. Au pic du soir, le tier web sature bien avant la base — leçon classique des couches de cache.",
+   615→    difficulty: "intermédiaire",
+   616→    tags: ["réseau social", "cache", "cdn", "réplication"],
+   617→    data: data(
+   618→      "Facebook — fil d'actualité",
+   619→      "Edge média, cache TAO, réplique de lecture et MySQL partitionné.",
+   620→      [
+   621→        node("n1", "user", "Utilisateurs", 80, 140, {}, "z1"),
+   622→        node("n2", "cdn", "CDN — médias & vignettes", 360, 140, { cacheHitRatio: 0.78, capacityRps: 100000 }, "z1"),
+   623→        node("n3", "load-balancer-l7", "LB web", 640, 140, {}, "z1"),
+   624→        node("n4", "api-server", "API web", 920, 140, { instances: 5, avgServiceMs: 40 }, "z1"),
+   625→        node("n5", "memcached", "Cache TAO — social graph", 1200, 40, { hitRatio: 0.9 }, "z2"),
+   626→        node("n6", "read-replica", "Réplique de lecture", 1200, 200, {}, "z2"),
+   627→        node("n7", "mysql", "MySQL partitionné — posts", 1200, 400, {}, "z3"),
+   628→      ],
+   629→      [
+   630→        edge("e1", "n1", "n2", "https", 20, 50),
+   631→        edge("e2", "n2", "n3", "https", 5, 200, "miss"),
+   632→        edge("e3", "n3", "n4", "http", 2, 200),
+   633→        edge("e4", "n4", "n5", "redis", 2, 100, "lectures"),
+   634→        edge("e5", "n5", "n6", "sql", 2, 100, "miss"),
+   635→        edge("e6", "n4", "n7", "sql", 4, 100, "écritures"),
+   636→        edge("e7", "n7", "n6", "sql", 40, 50, "réplication"),
+   637→      ],
+   638→      [
+   639→        zone("z1", "Frontal", "indigo", 40, 80, 1120, 190),
+   640→        zone("z2", "Lectures", "cyan", 1160, 0, 330, 300),
+   641→        zone("z3", "Écritures", "rose", 1160, 360, 330, 160),
+   642→      ],
+   643→      scenario({
+   644→        activeUsers: 60000,
+   645→        requestsPerSecond: 24000,
+   646→        readRatio: 0.9,
+   647→        profile: "spike",
+   648→        budgetPerMonthUsd: 8000,
+   649→      }),
+   650→    ),
+   651→  },
+   652→
+   653→  /* ------------------------------------------------------------------
+   654→   * 14. WhatsApp — messagerie temps réel
+   655→   * ------------------------------------------------------------------ */
+   656→  {
+   657→    id: "whatsapp-messagerie",
+   658→    name: "WhatsApp — messagerie temps réel",
+   659→    description:
+   660→      "Le cœur de WhatsApp : les clients mobiles gardent une connexion persistante (WebSocket) derrière un rate limiter anti-spam ; chaque message est persisté dans Cassandra et publié dans la file de livraison, dont les workers poussent les notifications. Au pic du soir, la livraison prend du retard avant la persistance.",
+   661→    difficulty: "intermédiaire",
+   662→    tags: ["messagerie", "temps réel", "kafka", "file"],
+   663→    data: data(
+   664→      "WhatsApp — messagerie temps réel",
+   665→      "Connexions persistantes, persistance Cassandra et livraison asynchrone.",
+   666→      [
+   667→        node("n1", "application-mobile", "Clients mobiles", 80, 220, {}, "z1"),
+   668→        node("n2", "websocket", "Passerelle WebSocket", 340, 220, { maxClients: 500000 }, "z1"),
+   669→        node("n3", "rate-limiter", "Rate limiter anti-spam", 600, 220, { limit: 8000, burst: 2000 }, "z1"),
+   670→        node("n4", "cassandra", "Cassandra — boîtes de réception", 880, 100, {}, "z2"),
+   671→        node("n5", "kafka", "Kafka — file de livraison", 880, 380, { partitions: 12 }, "z3"),
+   672→        node("n6", "consumer-group", "Workers de livraison", 1160, 380, { instances: 8, avgProcessingMs: 12 }, "z3"),
+   673→        node("n7", "service-notification", "Passerelle push", 1440, 380, {}, "z3"),
+   674→      ],
+   675→      [
+   676→        edge("e1", "n1", "n2", "websocket", 20, 50),
+   677→        edge("e2", "n2", "n3", "tcp", 2, 100),
+   678→        edge("e3", "n3", "n4", "tcp", 4, 100, "messages"),
+   679→        edge("e4", "n3", "n5", "kafka", 3, 200, "livraison"),
+   680→        edge("e5", "n5", "n6", "kafka", 2, 100),
+   681→        edge("e6", "n6", "n7", "https", 10, 50, "push"),
+   682→      ],
+   683→      [
+   684→        zone("z1", "Temps réel", "cyan", 40, 160, 770, 190),
+   685→        zone("z2", "Persistance", "emerald", 840, 40, 330, 160),
+   686→        zone("z3", "Livraison", "amber", 840, 320, 810, 190),
+   687→      ],
+   688→      scenario({
+   689→        activeUsers: 25000,
+   690→        requestsPerSecond: 5000,
+   691→        readRatio: 0.1,
+   692→        profile: "spike",
+   693→        budgetPerMonthUsd: 2000,
+   694→      }),
+   695→    ),
+   696→  },
+   697→
+   698→  /* ------------------------------------------------------------------
+   699→   * 15. Netflix — streaming résilient
+   700→   * ------------------------------------------------------------------ */
+   701→  {
+   702→    id: "netflix-streaming",
+   703→    name: "Netflix — streaming résilient",
+   704→    description:
+   705→      "La chaîne Netflix : CDN Open Connect, circuit breaker Hystrix devant l'origine, API edge (Zuul) déléguant au service de personnalisation, cache catalogue devant Cassandra et journal de visionnage sur Kafka. Architecture saine en régime nominal — injectez une panne sur le service de personnalisation pour voir le circuit breaker contenir la cascade.",
+   706→    difficulty: "avancé",
+   707→    tags: ["vidéo", "résilience", "circuit breaker", "microservices"],
+   708→    data: data(
+   709→      "Netflix — streaming résilient",
+   710→      "Edge protégé par circuit breaker, services chaînés et télémétrie événementielle.",
+   711→      [
+   712→        node("n1", "user", "Spectateurs", 80, 160, {}, "z1"),
+   713→        node("n2", "cdn", "CDN Open Connect", 360, 160, { cacheHitRatio: 0.8, capacityRps: 100000 }, "z1"),
+   714→        node("n3", "circuit-breaker", "Circuit Breaker — Hystrix", 640, 160, {}, "z1"),
+   715→        node("n4", "load-balancer-l7", "LB edge — Zuul", 900, 160, {}, "z1"),
+   716→        node("n5", "microservice", "API edge", 1180, 160, { instances: 6, avgServiceMs: 20 }, "z2"),
+   717→        node("n6", "microservice", "Service de personnalisation", 1180, 400, { instances: 4, avgServiceMs: 35 }, "z2"),
+   718→        node("n7", "memcached", "Cache catalogue", 1460, 240, { hitRatio: 0.85 }, "z3"),
+   719→        node("n8", "cassandra", "Cassandra — catalogue & visionnages", 1460, 460, {}, "z3"),
+   720→        node("n9", "kafka", "Kafka — journal de visionnage", 640, 580, { partitions: 8 }, "z4"),
+   721→        node("n10", "consumer-group", "Workers de télémétrie", 900, 580, { instances: 10, avgProcessingMs: 80 }, "z4"),
+   722→      ],
+   723→      [
+   724→        edge("e1", "n1", "n2", "https", 20, 100),
+   725→        edge("e2", "n2", "n3", "https", 5, 200, "miss"),
+   726→        edge("e3", "n3", "n4", "http", 2, 200),
+   727→        edge("e4", "n4", "n5", "http", 2, 200),
+   728→        edge("e5", "n5", "n6", "grpc", 3, 100),
+   729→        edge("e6", "n6", "n7", "redis", 2, 100, "lectures"),
+   730→        edge("e7", "n7", "n8", "sql", 2, 100, "miss"),
+   731→        edge("e8", "n6", "n9", "kafka", 3, 200, "visionnages"),
+   732→        edge("e9", "n9", "n10", "kafka", 3, 100),
+   733→        edge("e10", "n10", "n8", "tcp", 4, 100, "écritures"),
+   734→      ],
+   735→      [
+   736→        zone("z1", "Edge", "indigo", 40, 100, 1120, 190),
+   737→        zone("z2", "Services", "violet", 1140, 100, 330, 420),
+   738→        zone("z3", "Données", "emerald", 1420, 180, 330, 420),
+   739→        zone("z4", "Événementiel", "amber", 600, 520, 620, 190),
+   740→      ],
+   741→      scenario({
+   742→        activeUsers: 30000,
+   743→        requestsPerSecond: 15000,
+   744→        readRatio: 0.9,
+   745→        profile: "waves",
+   746→        budgetPerMonthUsd: 10000,
+   747→      }),
+   748→    ),
+   749→  },
+   750→
+   751→  /* ------------------------------------------------------------------
+   752→   * 16. Twitter/X — timelines
+   753→   * ------------------------------------------------------------------ */
+   754→  {
+   755→    id: "twitter-timeline",
+   756→    name: "Twitter/X — timelines",
+   757→    description:
+   758→      "Le fan-out à l'écriture de Twitter/X : les lectures servent les timelines précalculées depuis Redis (95 % de hit, miss → Cassandra) ; chaque tweet part dans le journal Kafka et les workers de fan-out matérialisent les timelines des abonnés dans le cache. Un tweet viral suffit à faire dériver les workers — le fameux problème des célébrités.",
+   759→    difficulty: "avancé",
+   760→    tags: ["réseau social", "fan-out", "kafka", "cache"],
+   761→    data: data(
+   762→      "Twitter/X — timelines",
+   763→      "Timelines précalculées, journal de tweets et workers de fan-out.",
+   764→      [
+   765→        node("n1", "user", "Utilisateurs actifs", 80, 240, {}, "z1"),
+   766→        node("n2", "load-balancer-l7", "LB", 360, 240, {}, "z1"),
+   767→        node("n3", "api-server", "API timeline", 640, 240, { instances: 8, avgServiceMs: 25 }, "z1"),
+   768→        node("n4", "redis", "Redis — timelines précalculées", 920, 120, { hitRatio: 0.95 }, "z2"),
+   769→        node("n5", "cassandra", "Cassandra — tweets & profils", 1280, 120, {}, "z3"),
+   770→        node("n6", "kafka", "Kafka — journal de tweets", 920, 400, { partitions: 8 }, "z4"),
+   771→        node("n7", "consumer-group", "Workers de fan-out", 1200, 400, { instances: 4, avgProcessingMs: 60 }, "z4"),
+   772→      ],
+   773→      [
+   774→        edge("e1", "n1", "n2", "https", 20, 50),
+   775→        edge("e2", "n2", "n3", "http", 2, 200),
+   776→        edge("e3", "n3", "n4", "redis", 2, 100, "lectures"),
+   777→        edge("e4", "n4", "n5", "tcp", 4, 100, "miss"),
+   778→        edge("e5", "n3", "n6", "kafka", 3, 200, "tweets"),
+   779→        edge("e6", "n6", "n7", "kafka", 3, 100),
+   780→        edge("e7", "n7", "n4", "redis", 2, 100, "matérialisation"),
+   781→      ],
+   782→      [
+   783→        zone("z1", "Frontal", "indigo", 40, 180, 790, 190),
+   784→        zone("z2", "Timelines", "cyan", 880, 60, 330, 160),
+   785→        zone("z3", "Données", "emerald", 1240, 60, 330, 160),
+   786→        zone("z4", "Fan-out", "amber", 880, 340, 690, 190),
+   787→      ],
+   788→      scenario({
+   789→        activeUsers: 20000,
+   790→        requestsPerSecond: 12000,
+   791→        readRatio: 0.95,
+   792→        profile: "spike",
+   793→        budgetPerMonthUsd: 2000,
+   794→      }),
+   795→    ),
+   796→  },
+   797→
+   798→  /* ------------------------------------------------------------------
+   799→   * 17. Uber — appariement en temps réel
+   800→   * ------------------------------------------------------------------ */
+   801→  {
+   802→    id: "uber-matching",
+   803→    name: "Uber — appariement en temps réel",
+   804→    description:
+   805→      "Le marché d'Uber : les passagers demandent, les chauffeurs publient leur position en continu (flux dominant) à travers la passerelle temps réel ; l'API sert les positions depuis Redis et publie les événements dans Kafka, dont les workers d'appariement maintiennent l'index géographique dans Cassandra. À l'heure de pointe (montée en charge), l'appariement frôle la saturation.",
+   806→    difficulty: "avancé",
+   807→    tags: ["géo", "temps réel", "kafka", "appariement"],
+   808→    data: data(
+   809→      "Uber — appariement en temps réel",
+   810→      "Flux GPS massif, positions en cache et appariement différé sur Kafka.",
+   811→      [
+   812→        node("n1", "application-mobile", "Clients — passagers", 80, 100, { weight: 3 }, "z1"),
+   813→        node("n2", "application-mobile", "Chauffeurs — flux GPS", 80, 340, { weight: 7 }, "z1"),
+   814→        node("n3", "websocket", "Passerelle temps réel", 360, 220, { maxClients: 300000 }, "z2"),
+   815→        node("n4", "load-balancer-l4", "LB de connexions", 620, 220, {}, "z2"),
+   816→        node("n5", "api-server", "API courses", 900, 220, { instances: 8, avgServiceMs: 15 }, "z2"),
+   817→        node("n6", "redis", "Redis — positions en mémoire", 1180, 100, { hitRatio: 0.9 }, "z4"),
+   818→        node("n7", "cassandra", "Cassandra — historique courses", 1180, 380, {}, "z4"),
+   819→        node("n8", "kafka", "Kafka — journal des positions", 900, 560, { partitions: 12 }, "z3"),
+   820→        node("n9", "consumer-group", "Workers d'appariement", 1180, 560, { instances: 6, avgProcessingMs: 8 }, "z3"),
+   821→      ],
+   822→      [
+   823→        edge("e1", "n1", "n3", "websocket", 20, 50),
+   824→        edge("e2", "n2", "n3", "websocket", 20, 50, "GPS"),
+   825→        edge("e3", "n3", "n4", "tcp", 2, 100),
+   826→        edge("e4", "n4", "n5", "http", 2, 200),
+   827→        edge("e5", "n5", "n6", "redis", 2, 100, "positions"),
+   828→        edge("e6", "n6", "n7", "tcp", 4, 100, "miss"),
+   829→        edge("e7", "n5", "n8", "kafka", 3, 200, "événements"),
+   830→        edge("e8", "n8", "n9", "kafka", 3, 100),
+   831→        edge("e9", "n9", "n7", "tcp", 4, 100, "appariements"),
+   832→      ],
+   833→      [
+   834→        zone("z1", "Clients mobiles", "indigo", 40, 40, 290, 420),
+   835→        zone("z2", "Temps réel", "cyan", 340, 160, 510, 190),
+   836→        zone("z3", "Appariement", "amber", 860, 500, 610, 190),
+   837→        zone("z4", "Données", "emerald", 1140, 20, 330, 460),
+   838→      ],
+   839→      scenario({
+   840→        activeUsers: 15000,
+   841→        requestsPerSecond: 10000,
+   842→        readRatio: 0.3,
+   843→        profile: "ramp",
+   844→        budgetPerMonthUsd: 2500,
+   845→      }),
+   846→    ),
+   847→  },
+   848→];
+   849→
+   850→export const TEMPLATE_MAP: Record<string, ArchitectureTemplate> = Object.fromEntries(
+   851→  TEMPLATES.map((t) => [t.id, t]),
+   852→);
+   853→
+   854→/* ------------------------------------------------------------------
+   855→ * Métadonnées « géants de la tech » : modèles inspirés d'architectures
+   856→ * réelles emblématiques. La galerie s'en sert pour le filtre et le badge
+   857→ * entreprise ; les données de graphe restent des abstractions
+   858→ * pédagogiques (échelle réduite, composants du catalogue).
+   859→ * ------------------------------------------------------------------ */
+   860→export const BIG_TECH_META: Record<string, { company: string; inspiration: string }> = {
+   861→  "youtube-video": {
+   862→    company: "YouTube",
+   863→    inspiration: "la chaîne de mise en ligne et de diffusion vidéo de YouTube",
+   864→  },
+   865→  "facebook-feed": {
+   866→    company: "Facebook",
+   867→    inspiration: "le fil d'actualité de Facebook et ses couches de cache TAO",
+   868→  },
+   869→  "whatsapp-messagerie": {
+   870→    company: "WhatsApp",
+   871→    inspiration: "la messagerie temps réel de WhatsApp (connexions persistantes)",
+   872→  },
+   873→  "netflix-streaming": {
+   874→    company: "Netflix",
+   875→    inspiration: "la distribution vidéo résiliente de Netflix (Open Connect, Zuul, Hystrix)",
+   876→  },
+   877→  "twitter-timeline": {
+   878→    company: "Twitter/X",
+   879→    inspiration: "les timelines de Twitter/X et le fan-out à l'écriture",
+   880→  },
+   881→  "uber-matching": {
+   882→    company: "Uber",
+   883→    inspiration: "l'appariement temps réel d'Uber (flux GPS, index géographique)",
+   884→  },
+   885→};
+   886→
+   887→export function isBigTechTemplate(id: string): boolean {
+   888→  return id in BIG_TECH_META;
+   889→}
+   890→
+   891→export function getTemplateById(id: string): ArchitectureTemplate | undefined {
+   892→  return TEMPLATE_MAP[id];
+   893→}
+   894→

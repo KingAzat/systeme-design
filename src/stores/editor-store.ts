@@ -99,10 +99,15 @@ export interface EditorState {
   simulationBarOpen: boolean;
   /** Bandeau pédagogique (objectif d'exercice) au-dessus du canvas. */
   exerciseHint: string | null;
+  /** Cours d'origine de l'exercice ouvert — alimente l'évaluation des
+   *  critères de réussite dans la vue résultats après simulation. */
+  exerciseCourseSlug: string | null;
   /** Incrémenté à chaque chargement/reset → déclenche fitView côté canvas. */
   docEpoch: number;
   /** Incrémenté à chaque mutation → déclenche la sauvegarde automatique. */
   revision: number;
+  /** Incrémenté par requestSave() (Ctrl+S) → consommé par la barre d'outils. */
+  saveRequests: number;
 
   /* --- actions document --- */
   addNode: (
@@ -138,9 +143,9 @@ export interface EditorState {
   deleteZone: (zoneId: string) => void;
   rename: (name: string) => void;
   setScenario: (patch: Partial<ScenarioConfig>) => void;
-  markSaved: (architectureId?: string) => void;
+  markSaved: (architectureId?: string, options?: { keepDirty?: boolean }) => void;
   loadArchitecture: (arch: Architecture) => void;
-  loadTemplate: (data: ArchitectureData, exerciseHint?: string | null) => void;
+  loadTemplate: (data: ArchitectureData, exerciseHint?: string | null, courseSlug?: string) => void;
   reset: () => void;
   toArchitectureData: () => ArchitectureData;
 
@@ -172,6 +177,8 @@ export interface EditorState {
   toggleSimulationBar: () => void;
   setSimulationBarOpen: (open: boolean) => void;
   setExerciseHint: (hint: string | null) => void;
+  /** Demande une sauvegarde explicite (Ctrl+S) — sans état intermédiaire. */
+  requestSave: () => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -271,6 +278,10 @@ function pointInZone(
 
 /** Protocole par défaut d'une nouvelle connexion, déduit des rôles simulés. */
 function defaultProtocol(source: ArchNode, target: ArchNode): Protocol {
+  // Journaux/franchisés : Kafka et Redis Streams parlent leur propre protocole,
+  // pas AMQP — sinon une arête kafka → worker affichait « AMQP ».
+  if (source.componentId === "kafka" || target.componentId === "kafka") return "kafka";
+  if (source.componentId === "redis-streams" || target.componentId === "redis-streams") return "redis";
   const roles = [
     getComponentById(source.componentId)?.simRole,
     getComponentById(target.componentId)?.simRole,
@@ -313,8 +324,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   configTab: "configuration",
   simulationBarOpen: true,
   exerciseHint: null,
+  exerciseCourseSlug: null,
   docEpoch: 0,
   revision: 0,
+  saveRequests: 0,
 
   /* ------------------------- document ------------------------- */
 
@@ -435,6 +448,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectedNodeIds: [],
       selectedNodeId: null,
       selectedZoneId: null,
+      // Symétrie avec addNode/addZone : la nouvelle connexion est sélectionnée
+      // et son panneau de configuration s'ouvre immédiatement.
+      configOpen: true,
     });
     return { ok: true };
   },
@@ -548,10 +564,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  markSaved: (architectureId) => {
+  markSaved: (architectureId, options) => {
     const s = get();
     set({
-      dirty: false,
+      // keepDirty : des mutations concurrentes pendant l'aller-retour réseau
+      // ne doivent pas être « acquittées » — la sauvegarde n'a couvert que la
+      // révision capturée au départ, l'auto-save reprendra les suivantes.
+      dirty: options?.keepDirty === true ? true : false,
       savedAt: new Date().toISOString(),
       architectureId: architectureId ?? s.architectureId,
     });
@@ -570,6 +589,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       scenario: JSON.parse(JSON.stringify(arch.scenario)) as ScenarioConfig,
       dirty: false,
       savedAt: arch.updatedAt,
+      exerciseHint: null,
+      exerciseCourseSlug: null,
       ...EMPTY_SELECTION,
       past: [],
       future: [],
@@ -578,7 +599,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  loadTemplate: (data, exerciseHint) => {
+  loadTemplate: (data, exerciseHint, courseSlug) => {
     lastCoalesced = null;
     dragActive = false;
     set({
@@ -591,10 +612,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       scenario: JSON.parse(JSON.stringify(data.scenario)) as ScenarioConfig,
       dirty: true,
       savedAt: null,
+      exerciseHint: exerciseHint ?? null,
+      exerciseCourseSlug: courseSlug ?? null,
       ...EMPTY_SELECTION,
       past: [],
       future: [],
-      exerciseHint: exerciseHint ?? null,
       docEpoch: get().docEpoch + 1,
       revision: get().revision + 1,
     });
@@ -619,6 +641,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       past: [],
       future: [],
       exerciseHint: null,
+      exerciseCourseSlug: null,
       docEpoch: get().docEpoch + 1,
       revision: get().revision + 1,
     });
@@ -807,7 +830,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         source: idMap.get(e.source) ?? e.source,
         target: idMap.get(e.target) ?? e.target,
       }))
-      .filter((e) => validIds.has(e.source) && validIds.has(e.target));
+      .filter((e) => validIds.has(e.source) && validIds.has(e.target))
+      // Un coller d'arête seule (sans nœuds) retombe sur la paire existante :
+      // sans ce filtre, une arête jumelle invisible serait ajoutée et rendrait
+      // la connexion « indestructible » (addEdge refuse déjà ce cas).
+      .filter(
+        (e) => !s.edges.some((existing) => existing.source === e.source && existing.target === e.target),
+      );
+    if (newNodes.length === 0 && newEdges.length === 0) return;
     set({
       ...historyPush(s),
       nodes: [...s.nodes, ...newNodes],
@@ -878,4 +908,5 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   toggleSimulationBar: () => set((s) => ({ simulationBarOpen: !s.simulationBarOpen })),
   setSimulationBarOpen: (open) => set({ simulationBarOpen: open }),
   setExerciseHint: (hint) => set({ exerciseHint: hint }),
+  requestSave: () => set((s) => ({ saveRequests: s.saveRequests + 1 })),
 }));

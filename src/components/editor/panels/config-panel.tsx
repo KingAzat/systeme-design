@@ -652,14 +652,14 @@ function NodePanelHeader({ node }: { node: ArchNode }) {
           style.icon,
         )}
       >
-        <CatalogIcon name={component?.icon} className="size-4" />
+        <CatalogIcon name={component?.icon} componentId={component?.id} className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold">{node.label}</p>
         <div className="mt-1 flex flex-wrap items-center gap-1">
           {healthy && (
             <Badge className="border-transparent bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
-              Healthy
+              Sain
             </Badge>
           )}
           {component && (
@@ -769,6 +769,21 @@ function NodeConfigPanel({ node }: { node: ArchNode }) {
             onClick={() => resetNodeConfig(node.id)}
           >
             Réinitialiser les paramètres
+          </Button>
+
+          {/* Suppression explicite : symétrie avec les panneaux connexion et
+              zone — le ✕ du nœud n'apparaissant qu'au survol, un nœud était
+              indélétable au tactile (tablette). */}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => {
+              useEditorStore.getState().selectNode(node.id);
+              useEditorStore.getState().deleteSelection();
+            }}
+          >
+            Supprimer le composant
           </Button>
         </div>
       </TabsContent>

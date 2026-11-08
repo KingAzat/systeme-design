@@ -171,7 +171,16 @@ export function validateArchitectureGraph(
       problems.push({ valid: false, reason: "Connexion vers un composant inexistant." });
       continue;
     }
-    const v = validateConnection(s.componentId, t.componentId, e.source, e.target, edges);
+    const v = validateConnection(
+      s.componentId,
+      t.componentId,
+      e.source,
+      e.target,
+      // L'arête candidate doit être exclue des arêtes existantes, sinon le
+      // test de doublon « Cette connexion existe déjà » la rejette elle-même
+      // et la fonction déclare invalide 100 % des graphes existants.
+      edges.filter((other) => other !== e),
+    );
     if (!v.valid) problems.push(v);
   }
   return problems;

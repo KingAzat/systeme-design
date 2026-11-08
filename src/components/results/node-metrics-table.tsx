@@ -8,7 +8,8 @@ import { useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { NodeMetrics } from "@/types";
 import { getComponentById } from "@/data/catalog";
-import { getCategoryStyle, getIcon } from "@/lib/icons";
+import { getCategoryStyle } from "@/lib/icons";
+import { CatalogIcon } from "@/components/editor/catalog-icon";
 import { formatCost, formatMs, formatNumber, formatPercent, formatRps } from "@/lib/format";
 import {
   ERROR_RATE_CRITICAL,
@@ -136,7 +137,6 @@ export function NodeMetricsTable({
         <TableBody>
           {sorted.map((m) => {
             const component = getComponentById(m.componentId);
-            const Icon = getIcon(component?.icon);
             const categoryStyle = getCategoryStyle(component?.category ?? "");
             const isBottleneck = bottleneckNodeId === m.nodeId;
             const isSelected = selectedNodeId === m.nodeId;
@@ -168,7 +168,7 @@ export function NodeMetricsTable({
                         categoryStyle.icon,
                       )}
                     >
-                      <Icon className="size-3.5" />
+                      <CatalogIcon name={component?.icon} componentId={m.componentId} className="size-3.5" />
                     </span>
                     <span className="truncate font-medium" title={m.label}>
                       {m.label}

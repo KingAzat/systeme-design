@@ -457,6 +457,8 @@ export interface Course {
   sections: CourseSection[];
   concepts: string[];
   quiz: QuizQuestion[];
+  /** Points essentiels à retenir (affichés en fin de cours) */
+  keyTakeaways?: string[];
   exercise?: CourseExercise;
 }
 

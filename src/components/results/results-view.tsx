@@ -64,6 +64,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { DiagnosticsSection } from "./diagnostics-section";
+import { ExerciseGoalsCard } from "./exercise-goals-card";
 import { KpiCard } from "./kpi-card";
 import { LoadMap } from "./load-map";
 import { NodeMetricsTable } from "./node-metrics-table";
@@ -100,6 +101,7 @@ export function ResultsView() {
   const setView = useAppStore((s) => s.setView);
   const openCompare = useAppStore((s) => s.openCompare);
   const simulations = useAppStore((s) => s.simulations);
+  const activeExerciseSlug = useAppStore((s) => s.activeExerciseSlug);
   const simStatus = useSimulationStore((s) => s.status);
   const runSimulation = useSimulationStore((s) => s.run);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -185,6 +187,8 @@ export function ResultsView() {
   const handleRerun = async () => {
     if (running) return;
     try {
+      // Une relance conserve le contexte d'exercice : les critères du cours
+      // restent évalués après la nouvelle exécution.
       await runSimulation(
         {
           name: r.architectureName,
@@ -194,6 +198,7 @@ export function ResultsView() {
           scenario,
         },
         r.architectureId !== "local" ? r.architectureId : null,
+        activeExerciseSlug,
       );
     } catch (error) {
       toast.error("Relance impossible", {
@@ -250,6 +255,9 @@ export function ResultsView() {
           </Button>
         </div>
       </header>
+
+      {/* ---------- Objectifs de l'exercice (si lancé depuis un cours) ---------- */}
+      <ExerciseGoalsCard result={r} />
 
       {/* ---------- KPI ---------- */}
       <section className="mt-8 space-y-3">

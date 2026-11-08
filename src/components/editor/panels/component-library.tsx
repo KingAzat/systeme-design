@@ -129,7 +129,7 @@ function ComponentCard({
                   style.icon,
                 )}
               >
-                <CatalogIcon name={component.icon} className="size-3.5" />
+                <CatalogIcon name={component.icon} componentId={component.id} className="size-3.5" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-xs font-medium">
@@ -149,7 +149,7 @@ function ComponentCard({
                     style.icon,
                   )}
                 >
-                  <CatalogIcon name={component.icon} className="size-3.5" />
+                  <CatalogIcon name={component.icon} componentId={component.id} className="size-3.5" />
                 </span>
                 <p className="truncate text-xs font-medium">{component.name}</p>
               </div>

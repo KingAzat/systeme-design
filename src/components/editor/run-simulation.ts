@@ -22,5 +22,9 @@ export async function launchSimulation(): Promise<void> {
     toast.error(`Simulation impossible : ${errors[0].message}`);
     return;
   }
-  await useSimulationStore.getState().run(arch, editor.architectureId);
+  // Le contexte d'exercice (leçon d'origine) accompagne le résultat : la vue
+  // résultats pourra évaluer les critères de réussite du cours concerné.
+  await useSimulationStore
+    .getState()
+    .run(arch, editor.architectureId, editor.exerciseCourseSlug);
 }

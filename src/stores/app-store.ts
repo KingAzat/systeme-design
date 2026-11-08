@@ -20,7 +20,7 @@ import { TEMPLATES } from "@/data/templates";
 /** Commande à consommer par l'éditeur au montage/à l'activation. */
 export type EditorCommand =
   | { kind: "new" }
-  | { kind: "load-template"; templateId: string; exerciseHint?: string }
+  | { kind: "load-template"; templateId: string; exerciseHint?: string; courseSlug?: string }
   | { kind: "open-architecture"; architectureId: string };
 
 interface AppState {
@@ -33,6 +33,9 @@ interface AppState {
   compareB: SimulationResult | null;
   /** Cours ouvert dans la vue apprentissage. */
   activeCourseSlug: string | null;
+  /** Exercice actif : le cours dont l'exercice vient d'être lancé — la vue
+   *  résultats évalue les critères de réussite sur les métriques obtenues. */
+  activeExerciseSlug: string | null;
   /** Commande en attente pour l'éditeur. */
   editorCommand: EditorCommand | null;
 
@@ -50,10 +53,10 @@ interface AppState {
   openEditorWithCommand: (command: EditorCommand) => void;
   /** Consommé par l'éditeur après prise en compte (évite les rechargements). */
   clearEditorCommand: () => void;
-  openTemplate: (templateId: string, exerciseHint?: string) => void;
+  openTemplate: (templateId: string, exerciseHint?: string, courseSlug?: string) => void;
   openArchitecture: (architectureId: string) => void;
   newArchitecture: () => void;
-  openResult: (result: SimulationResult) => void;
+  openResult: (result: SimulationResult, exerciseSlug?: string | null) => void;
   openCompare: (a: SimulationResult, b: SimulationResult) => void;
   openCourse: (slug: string | null) => void;
 
@@ -72,6 +75,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   compareA: null,
   compareB: null,
   activeCourseSlug: null,
+  activeExerciseSlug: null,
   editorCommand: null,
 
   architectures: [],
@@ -104,8 +108,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearEditorCommand: () => set({ editorCommand: null }),
 
-  openTemplate: (templateId, exerciseHint) => {
-    get().openEditorWithCommand({ kind: "load-template", templateId, exerciseHint });
+  openTemplate: (templateId, exerciseHint, courseSlug) => {
+    get().openEditorWithCommand({ kind: "load-template", templateId, exerciseHint, courseSlug });
   },
 
   openArchitecture: (architectureId) => {
@@ -116,8 +120,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().openEditorWithCommand({ kind: "new" });
   },
 
-  openResult: (result) => {
-    set({ currentResult: result });
+  openResult: (result, exerciseSlug) => {
+    // Le contexte d'exercice n'est légitime que pour le résultat fraîchement
+    // simulé depuis l'éditeur — un résultat rouvert depuis l'historique ou le
+    // tableau de bord (sans exerciseSlug) le remet à zéro.
+    set({ currentResult: result, activeExerciseSlug: exerciseSlug ?? null });
     get().setView("results");
   },
 
@@ -128,7 +135,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   openCourse: (slug) => {
     set({ activeCourseSlug: slug });
-    if (!slug) get().setView("learn");
+    // Symétrique : ouvrir un cours bascule toujours vers l'apprentissage
+    // (idempotent si la vue y est déjà), seul openCourse(null) revient à la liste.
+    get().setView("learn");
   },
 
   refreshArchitectures: async () => {

@@ -64,6 +64,7 @@ let mobileCollapseForced = false;
  * Factorisée : utilisée par le chemin non-dirty (exécution immédiate) et par la
  * confirmation de la garde anti-perte.
  */
+let commandSeq = 0;
 async function executeCommand(cmd: EditorCommand): Promise<void> {
   if (cmd.kind === "new") {
     useEditorStore.getState().reset();
@@ -72,15 +73,27 @@ async function executeCommand(cmd: EditorCommand): Promise<void> {
   if (cmd.kind === "load-template") {
     const template = TEMPLATES.find((t) => t.id === cmd.templateId);
     if (template) {
-      useEditorStore.getState().loadTemplate(template.data, cmd.exerciseHint ?? null);
+      useEditorStore
+        .getState()
+        .loadTemplate(template.data, cmd.exerciseHint ?? null, cmd.courseSlug);
       toast.success(`Modèle « ${template.name} » chargé dans l'éditeur`);
     } else {
       toast.error("Modèle introuvable.");
     }
     return;
   }
-  // open-architecture : chargement asynchrone depuis l'API.
-  const arch = await storage.architectures.get(cmd.architectureId);
+  // open-architecture : chargement asynchrone depuis l'API. Un jeton de
+  // séquence neutralise la course « deux ouvertures rapprochées » — si une
+  // commande plus récente a été lancée pendant le vol, le résultat tardif
+  // est ignoré au lieu d'écraser le document affiché.
+  const seq = ++commandSeq;
+  let arch: Awaited<ReturnType<typeof storage.architectures.get>> = null;
+  try {
+    arch = await storage.architectures.get(cmd.architectureId);
+  } catch {
+    arch = null;
+  }
+  if (seq !== commandSeq) return;
   if (arch) {
     useEditorStore.getState().loadArchitecture(arch);
     toast.success(`Architecture « ${arch.name} » ouverte`);
@@ -195,6 +208,24 @@ export function EditorView() {
       draft = null;
     }
     if (!draft?.data) return;
+    // Garde de forme : un brouillon corrompu (clé tronquée, quota, format
+    // périmé) ne doit JAMAIS casser l'éditeur — sans elle, loadTemplate
+    // planterait sur deepCloneNodes(undefined) et démonterait l'arbre React.
+    const d = draft.data;
+    if (
+      !Array.isArray(d.nodes) ||
+      !Array.isArray(d.edges) ||
+      !Array.isArray(d.zones) ||
+      typeof d.scenario !== "object" ||
+      d.scenario === null
+    ) {
+      try {
+        sessionStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // purge best-effort
+      }
+      return;
+    }
     // loadTemplate pose architectureId = null et marque dirty — exactement
     // l'état « brouillon non sauvegardé » d'origine.
     useEditorStore.getState().loadTemplate(draft.data, null);

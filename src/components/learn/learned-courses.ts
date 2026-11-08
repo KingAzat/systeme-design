@@ -39,15 +39,21 @@ function getSnapshot(): string[] {
 }
 
 function subscribe(callback: () => void): () => void {
-  const invalidate = () => {
+  // Événement custom (même onglet) : le cache vient d'être mis à jour par
+  // write() — il ne faut PAS l'invalider, sinon un setItem en échec (quota,
+  // navigation privée) relirait un storage inchangé et la coche disparaîtrait
+  // immédiatement au lieu de vivre en « progression de session ».
+  const onLocalChange = () => callback();
+  // storage (AUTRE onglet) : le storage local a réellement changé → invalider.
+  const onStorageChange = () => {
     cached = null;
     callback();
   };
-  window.addEventListener(LEARNED_EVENT, invalidate);
-  window.addEventListener("storage", invalidate);
+  window.addEventListener(LEARNED_EVENT, onLocalChange);
+  window.addEventListener("storage", onStorageChange);
   return () => {
-    window.removeEventListener(LEARNED_EVENT, invalidate);
-    window.removeEventListener("storage", invalidate);
+    window.removeEventListener(LEARNED_EVENT, onLocalChange);
+    window.removeEventListener("storage", onStorageChange);
   };
 }
 

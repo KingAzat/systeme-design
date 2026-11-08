@@ -194,7 +194,9 @@ export function serverFields(o: {
       help: "Requêtes traitées simultanément par instance.",
     }),
     f.num("timeoutMs", "Timeout (ms)", o.timeoutMs ?? 3000, "advanced", {
-      min: 100, max: 30000, step: 100,
+      // Max 60 000 aligné sur workerFields : l'agent IA (défaut 60 s,
+      // raisonnement multi-étapes) doit rester dans les bornes du curseur.
+      min: 100, max: 60000, step: 100,
     }),
     f.num("errorRate", "Taux d'erreur applicatif (0-1)", o.errorRate ?? 0.001, "advanced", {
       min: 0, max: 0.2, step: 0.001,

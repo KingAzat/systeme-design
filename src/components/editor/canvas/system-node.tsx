@@ -24,19 +24,19 @@ import type { NodeStatus, SystemNodeData, SystemNodeType } from "./types";
 
 const STATUS_META: Record<NodeStatus, { label: string; dot: string; title: string }> = {
   healthy: {
-    label: "Healthy",
+    label: "Sain",
     dot: "bg-success",
-    title: "Healthy : utilisation et taux d'erreur sous contrôle",
+    title: "Sain : utilisation et taux d'erreur sous contrôle",
   },
   saturated: {
-    label: "Saturated",
+    label: "Saturé",
     dot: "bg-warning",
-    title: `Saturated : utilisation ≥ ${Math.round(UTILIZATION_WARN * 100)} % — à surveiller, la charge approche des limites`,
+    title: `Saturé : utilisation ≥ ${Math.round(UTILIZATION_WARN * 100)} % — à surveiller, la charge approche des limites`,
   },
   critical: {
-    label: "Critical",
+    label: "Critique",
     dot: "bg-destructive",
-    title: `Critical : utilisation ≥ ${Math.round(UTILIZATION_CRITICAL * 100)} % ou taux d'erreur > ${Math.round(ERROR_RATE_CRITICAL * 100)} %`,
+    title: `Critique : utilisation ≥ ${Math.round(UTILIZATION_CRITICAL * 100)} % ou taux d'erreur > ${Math.round(ERROR_RATE_CRITICAL * 100)} %`,
   },
 };
 
@@ -96,7 +96,7 @@ function SystemNodeInner({ id, data, selected }: NodeProps<SystemNodeType>) {
           categoryStyle.icon,
         )}
       >
-        <CatalogIcon name={component?.icon} className="size-4" />
+        <CatalogIcon name={component?.icon} componentId={component?.id} className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm leading-tight font-medium">{archNode.label}</p>

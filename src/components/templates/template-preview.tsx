@@ -3,6 +3,14 @@
 import { useId } from "react";
 import type { ArchitectureData, ZoneColor } from "@/types";
 import { getComponentById } from "@/data/catalog/registry";
+import { getComponentLogo } from "@/lib/brand-logos";
+
+/** Classe de thème sombre d'un logo de marque dans l'aperçu SVG. */
+function brandDarkClass(darkMode: "invert" | "brighten" | "none" | undefined): string | undefined {
+  if (darkMode === "invert") return "dark:invert";
+  if (darkMode === "brighten") return "dark:brightness-[1.9]";
+  return undefined;
+}
 
 /**
  * SystemLab — Aperçu SVG statique d'un modèle d'architecture.
@@ -159,9 +167,9 @@ export function TemplatePreview({
                 height={z.size.height}
                 rx={10}
                 fill={hex}
-                fillOpacity={0.05}
+                fillOpacity={0.07}
                 stroke={hex}
-                strokeOpacity={0.35}
+                strokeOpacity={0.45}
                 strokeWidth={1}
                 strokeDasharray="6 4"
               />
@@ -201,16 +209,18 @@ export function TemplatePreview({
               x2={clipped.ex}
               y2={clipped.ey}
               strokeWidth={1.4}
-              className="stroke-muted-foreground/45 dark:stroke-muted-foreground/65"
+              className="stroke-muted-foreground/50 dark:stroke-muted-foreground/75"
               markerEnd={`url(#${markerId})`}
             />
           );
         })}
 
-        {/* Nœuds — petits rectangles avec point coloré par catégorie */}
+        {/* Nœuds — petits rectangles avec logo de marque ou point coloré */}
         {data.nodes.map((n) => {
-          const category = getComponentById(n.componentId)?.category;
+          const component = getComponentById(n.componentId);
+          const category = component?.category;
           const hex = (category && CATEGORY_HEX[category]) || "#64748b";
+          const brand = getComponentLogo(n.componentId);
           return (
             <g key={`node-${n.id}`}>
               <rect
@@ -220,14 +230,24 @@ export function TemplatePreview({
                 height={NODE_H}
                 rx={7}
                 strokeWidth={1}
-                className="fill-card stroke-border dark:fill-muted-foreground/15 dark:stroke-muted-foreground/45"
+                className="fill-card stroke-muted-foreground/45 dark:fill-muted-foreground/25 dark:stroke-muted-foreground/85"
               />
-              <circle
-                cx={n.position.x + 15}
-                cy={n.position.y + NODE_H / 2}
-                r={4}
-                fill={hex}
-              />
+              {brand ? (
+                // Logo de marque 11×11 (viewBox 24) centré sur l'ancien point.
+                <path
+                  d={brand.path}
+                  fill={brand.color}
+                  className={brandDarkClass(brand.darkMode)}
+                  transform={`translate(${n.position.x + 9.5}, ${n.position.y + NODE_H / 2 - 5.5}) scale(${11 / 24})`}
+                />
+              ) : (
+                <circle
+                  cx={n.position.x + 15}
+                  cy={n.position.y + NODE_H / 2}
+                  r={4}
+                  fill={hex}
+                />
+              )}
             </g>
           );
         })}

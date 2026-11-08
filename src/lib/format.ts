@@ -91,8 +91,15 @@ export function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
-/** Génère un identifiant court unique (préfixe + horodatage + aléa cryptographique) */
+/** Génère un identifiant court unique (préfixe + horodatage + aléa) */
 export function shortId(prefix: string): string {
-  const rnd = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  // Repli explicite : crypto.randomUUID n'existe pas hors contexte sécurisé
+  // (HTTP sur IP LAN) — sans lui, chaque ajout de composant plantait.
+  let rnd: string;
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    rnd = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  } else {
+    rnd = Math.random().toString(16).slice(2, 10);
+  }
   return `${prefix}-${Date.now().toString(36)}${rnd}`;
 }

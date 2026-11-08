@@ -53,7 +53,7 @@ export const CORE_COMPONENTS: CatalogComponent[] = [
     ports: { inputs: 0, outputs: 1 },
     fields: [
       f.num("weight", "Poids de trafic", 1, "advanced", {
-        min: 1, max: 10, step: 1, help: "Répartition du trafic entre plusieurs sources.",
+        min: 1, max: 20, step: 1, help: "Répartition du trafic entre plusieurs sources.",
       }),
     ],
     defaults: { weight: 1 },
